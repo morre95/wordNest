@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wordnest/core/db/database.dart';
+import 'package:wordnest/core/db/tables.dart';
 import 'package:wordnest/core/models/language.dart';
 import 'package:wordnest/core/permissions/microphone_permission.dart';
 import 'package:wordnest/core/speech/speech_recognizer.dart';
@@ -259,6 +261,67 @@ void main() {
       expect(
         container.read(speakControllerProvider).notice,
         isA<TranslationModelDownloadFailed>(),
+      );
+    });
+  });
+
+  group('persistence', () {
+    test('a finalised utterance is saved with its final translation', () async {
+      final database = WordNestDatabase.memory();
+      addTearDown(database.close);
+      final container = ProviderContainer.test(
+        overrides: speakOverrides(
+          recognizer: recognizer,
+          translator: translator,
+          permissions: permissions,
+          preferences: preferences,
+          database: database,
+        ),
+      );
+      final controller = container.read(speakControllerProvider.notifier);
+      await controller.startListening();
+
+      recognizer.emitFinal('the bakery is closed');
+      await settle();
+      await settle();
+      await settle();
+
+      final saved = await database.select(database.utterances).get();
+      expect(saved.single.sourceText, 'the bakery is closed');
+      expect(saved.single.translationText, '[es] the bakery is closed');
+      expect(
+        container.read(speakControllerProvider).savedUtteranceId,
+        saved.single.id,
+      );
+    });
+
+    test('a sentence is kept even when it could not be translated', () async {
+      translator.presentModels.remove('es');
+      final database = WordNestDatabase.memory();
+      addTearDown(database.close);
+      final container = ProviderContainer.test(
+        overrides: speakOverrides(
+          recognizer: recognizer,
+          translator: translator,
+          permissions: permissions,
+          preferences: preferences,
+          database: database,
+        ),
+      );
+      await container.read(speakControllerProvider.notifier).startListening();
+
+      recognizer.emitFinal('the bakery is closed');
+      await settle();
+      await settle();
+      await settle();
+
+      final saved = await database.select(database.utterances).get();
+      expect(saved.single.sourceText, 'the bakery is closed');
+      expect(saved.single.translationText, '');
+      expect(
+        saved.single.enrichmentState,
+        EnrichmentState.pending,
+        reason: 'the backend should still get a chance at it',
       );
     });
   });

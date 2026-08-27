@@ -58,3 +58,46 @@ than it recommends; the build is otherwise clean.
 **Generated code is not committed.** `*.freezed.dart`, `*.g.dart` and drift's
 output are in `.gitignore`. Trade-off: a fresh clone must run
 `dart run build_runner build` before `flutter test` works, which the README says.
+
+## Milestone 2 — persistence
+
+**Sync columns are in the first migration, on every table.** `id` (client
+UUIDv7), `updated_at`, `deleted_at`, `dirty` come from a `SyncedRow` mixin.
+Trade-off: four columns carried before anything uses them, against never having
+to migrate a user's glossary when sync ships.
+
+**Timestamps are stored as ISO-8601 text, not Unix seconds.**
+`store_date_time_values_as_text: true` in `build.yaml`. Trade-off: slightly
+larger rows and string comparison instead of integer; in exchange `updated_at`
+keeps milliseconds, so last-write-wins has far fewer unresolvable ties, and the
+stored value is unambiguously UTC.
+
+**Deletes are tombstones everywhere.** `delete()` sets `deleted_at` and leaves
+the row. Trade-off: the database only grows until a compaction job exists;
+without tombstones a delete on one device would be undone by the next pull.
+
+**Seen counts are derived, never incremented.** A `glossary_occurrences` row is
+written per (word, sentence) pair and the count is recomputed from it.
+Trade-off: one extra row per word per sentence, against the alternative — two
+offline devices each incrementing a counter and one of them losing.
+
+**The example sentence follows the most recent hearing.** Trade-off: the user
+loses the first context they met the word in; a recent sentence is more useful
+for recall, and every past sentence is still listed on the detail screen.
+
+**Saying a deleted word again revives its row.** `deleted_at` is cleared rather
+than a second row created. Trade-off: a user who deleted a word deliberately
+sees it return if they say it again; the alternative is two rows for one word,
+which breaks the uniqueness the merge rules depend on.
+
+**Offline vocabulary extraction is a stopword filter, not a lemmatiser.**
+`extractVocabulary` tokenises, lowercases and drops function words, with lists
+for the seven languages most likely to be a user's native tongue. Trade-off:
+"opens" and "open" are two entries until the backend's lemmatiser corrects
+them; the alternative is an empty glossary whenever the network is down. A
+language with no stopword list keeps every token — over-collecting is visible
+and fixable, under-collecting is not.
+
+**The utterance is saved even when translation fails.** The row is written with
+an empty translation and left `pending`, so the sentence survives and the
+backend can fill it in later.

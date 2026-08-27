@@ -97,5 +97,6 @@ class NoticeBanner extends StatelessWidget {
         NothingHeard() => ("I didn't catch that — try again.", null),
         RecognitionFailed() => ('Speech recognition stopped unexpectedly.', null),
         TranslationFailed() => ('That could not be translated just now.', null),
+        CouldNotSave() => ('That sentence could not be saved to your glossary.', null),
       };
 }

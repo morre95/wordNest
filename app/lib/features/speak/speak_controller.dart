@@ -1,6 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/db/utterance_repository.dart';
 
 import '../../core/models/language.dart';
 import '../../core/permissions/microphone_permission.dart';
@@ -29,7 +32,9 @@ class SpeakController extends Notifier<SpeakState> {
 
   SpeechRecognizer get _recognizer => ref.read(speechRecognizerProvider);
   OnDeviceTranslator get _translator => ref.read(onDeviceTranslatorProvider);
-  MicrophonePermissions get _permissions => ref.read(microphonePermissionsProvider);
+  MicrophonePermissions get _permissions =>
+      ref.read(microphonePermissionsProvider);
+  UtteranceRepository get _utterances => ref.read(utteranceRepositoryProvider);
   LanguagePreferences get _preferences => ref.read(languagePreferencesProvider);
 
   @override
@@ -175,16 +180,13 @@ class SpeakController extends Notifier<SpeakState> {
         _debounce?.cancel();
         state = state.copyWith(
           sourceText: text,
+          savedUtteranceId: null,
           status: state.mode == ListeningMode.continuous
               ? SpeakStatus.listening
               : SpeakStatus.idle,
           soundLevel: 0,
         );
-        _translateNow(
-          text,
-          source: TranslationSource.finalOnDevice,
-          revision: _transcriptRevision,
-        );
+        unawaited(_finalise(text, revision: _transcriptRevision));
 
       case SpeechSoundLevel(:final level):
         state = state.copyWith(soundLevel: level);
@@ -227,24 +229,68 @@ class SpeakController extends Notifier<SpeakState> {
 
   /// Translates [text] on-device and writes the result unless a newer
   /// transcript has arrived in the meantime.
-  Future<void> _translateNow(
+  ///
+  /// Returns the translation, or null if it could not be produced.
+  Future<String?> _translateNow(
     String text, {
     required TranslationSource source,
     int? revision,
   }) async {
     final forRevision = revision ?? _transcriptRevision;
-    if (text.trim().isEmpty) return;
+    if (text.trim().isEmpty) return null;
     try {
       final translation = await _translator.translate(text, pair: state.pair);
-      if (forRevision != _transcriptRevision) return;
+      if (forRevision != _transcriptRevision) return translation;
       state = state.copyWith(
         translationText: translation,
         translationSource: source,
       );
+      return translation;
     } on TranslationFailure catch (failure) {
-      if (forRevision != _transcriptRevision) return;
-      state = state.copyWith(notice: _noticeForTranslation(failure));
+      if (forRevision == _transcriptRevision) {
+        state = state.copyWith(notice: _noticeForTranslation(failure));
+      }
+      return null;
     }
+  }
+
+  /// Translates the finished utterance and saves it, in that order, so the
+  /// stored row carries the best translation available offline.
+  ///
+  /// The save happens even when translation failed: the sentence the user said
+  /// is worth keeping, and the backend fills the translation in later. A
+  /// storage failure is surfaced but never re-raised — losing a row must not
+  /// take the microphone down with it.
+  Future<void> _finalise(String text, {required int revision}) async {
+    final pair = state.pair;
+    final translation = await _translateNow(
+      text,
+      source: TranslationSource.finalOnDevice,
+      revision: revision,
+    );
+
+    try {
+      final saved = await _utterances.saveFinalised(
+        sourceText: text,
+        translationText: translation ?? '',
+        pair: pair,
+      );
+      if (revision == _transcriptRevision) {
+        state = state.copyWith(savedUtteranceId: saved.id);
+      }
+    } on Object catch (error, stackTrace) {
+      debugPrint('WordNest: could not save utterance: $error\n$stackTrace');
+      if (revision == _transcriptRevision) {
+        state = state.copyWith(notice: const CouldNotSave());
+      }
+    }
+  }
+
+  /// Marks the utterance just spoken as one the user found hard.
+  Future<void> flagLastUtterance() async {
+    final id = state.savedUtteranceId;
+    if (id == null) return;
+    await _utterances.setFlagged(id, isFlagged: true);
   }
 
   // --- Permission ---------------------------------------------------------

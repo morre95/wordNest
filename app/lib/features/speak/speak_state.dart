@@ -54,6 +54,10 @@ abstract class SpeakState with _$SpeakState {
     /// True when the last session ran entirely on-device. False means the
     /// platform fell back to network recognition and the user should know.
     @Default(true) bool isRecognitionOnDevice,
+
+    /// The row the last finalised utterance was saved as. Lets the screen flag
+    /// what was just said, and gives the backend queue something to enrich.
+    String? savedUtteranceId,
     SpeakNotice? notice,
   }) = _SpeakState;
 

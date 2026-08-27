@@ -1,0 +1,10 @@
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          # Store timestamps as ISO-8601 text rather than Unix seconds.
+          # Sync compares `updated_at` across devices to resolve last-write-wins;
+          # second precision would make ties common, and ties have no correct
+          # answer. Text storage keeps milliseconds and is unambiguous about UTC.
+          store_date_time_values_as_text: true

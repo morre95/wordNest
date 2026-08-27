@@ -112,3 +112,13 @@ class TranslationFailed extends SpeakNotice {
   @override
   int get hashCode => Object.hash(TranslationFailed, detail);
 }
+
+/// The utterance could not be written to the local database.
+class CouldNotSave extends SpeakNotice {
+  const CouldNotSave();
+
+  @override
+  bool operator ==(Object other) => other is CouldNotSave;
+  @override
+  int get hashCode => (CouldNotSave).hashCode;
+}

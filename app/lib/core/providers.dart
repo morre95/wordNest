@@ -1,5 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'db/database.dart';
+import 'db/glossary_repository.dart';
+import 'db/utterance_repository.dart';
 import 'models/language.dart';
 import 'permissions/microphone_permission.dart';
 import 'settings/language_preferences.dart';
@@ -37,3 +40,22 @@ final onDeviceTranslatorProvider = Provider<OnDeviceTranslator>((ref) {
   ref.onDispose(translator.dispose);
   return translator;
 });
+
+/// The device's source of truth. Opened once and kept for the app's lifetime;
+/// tests override this with an in-memory database.
+final databaseProvider = Provider<WordNestDatabase>((ref) {
+  final database = WordNestDatabase();
+  ref.onDispose(database.close);
+  return database;
+});
+
+final glossaryRepositoryProvider = Provider<GlossaryRepository>(
+  (ref) => GlossaryRepository(database: ref.watch(databaseProvider)),
+);
+
+final utteranceRepositoryProvider = Provider<UtteranceRepository>(
+  (ref) => UtteranceRepository(
+    database: ref.watch(databaseProvider),
+    glossaryRepository: ref.watch(glossaryRepositoryProvider),
+  ),
+);

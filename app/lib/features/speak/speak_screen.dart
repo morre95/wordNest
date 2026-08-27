@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/models/language.dart';
+import '../../core/router.dart';
 import '../../core/speech/speech_recognizer.dart';
 import 'speak_controller.dart';
 import 'speak_state.dart';
@@ -26,6 +28,12 @@ class SpeakScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('WordNest'),
         actions: [
+          IconButton(
+            key: const Key('speak.openGlossary'),
+            tooltip: 'Glossary',
+            icon: const Icon(Icons.menu_book_outlined),
+            onPressed: () => context.push(Routes.glossary),
+          ),
           _HandsFreeToggle(
             isHandsFree: isHandsFree,
             onChanged: (value) => controller.setMode(
