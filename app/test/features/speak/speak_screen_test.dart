@@ -9,6 +9,7 @@ import 'package:wordnest/features/speak/speak_screen.dart';
 import 'package:wordnest/features/speak/widgets/mic_button.dart';
 
 import '../../fakes/fake_microphone_permissions.dart';
+import '../../fakes/fake_speaker.dart';
 import '../../fakes/fake_speech_recognizer.dart';
 import '../../fakes/fake_translator.dart';
 import '../../fakes/speak_harness.dart';
@@ -17,11 +18,13 @@ void main() {
   late FakeSpeechRecognizer recognizer;
   late FakeTranslator translator;
   late FakeMicrophonePermissions permissions;
+  late FakeSpeaker speaker;
 
   setUp(() {
     recognizer = FakeSpeechRecognizer();
     translator = FakeTranslator();
     permissions = FakeMicrophonePermissions();
+    speaker = FakeSpeaker();
   });
 
   Future<void> pumpSpeakScreen(WidgetTester tester) async {
@@ -31,6 +34,7 @@ void main() {
           recognizer: recognizer,
           translator: translator,
           permissions: permissions,
+          speaker: speaker,
         ),
         child: MaterialApp(
           theme: WordNestTheme.light(),
@@ -157,6 +161,38 @@ void main() {
     expect(translator.downloaded, ['es']);
     expect(find.byKey(const Key('speak.notice')), findsNothing);
     expect(find.text('[es] hola'), findsOneWidget);
+  });
+
+  testWidgets('tapping a settled translation speaks it in the target language',
+      (tester) async {
+    await pumpSpeakScreen(tester);
+    await tester.tap(find.byType(MicButton));
+    await tester.pump();
+    recognizer.emitFinal('good evening');
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('speak.translationText')));
+    await tester.pump();
+
+    expect(speaker.spoken.single.text, '[es] good evening');
+    expect(speaker.spoken.single.languageCode, 'es');
+  });
+
+  testWidgets('a provisional translation is not spoken', (tester) async {
+    // It is about to be replaced; hearing it would teach the wrong
+    // pronunciation.
+    await pumpSpeakScreen(tester);
+    await tester.tap(find.byType(MicButton));
+    await tester.pump();
+    recognizer.emitPartial('good eve');
+    await tester.pump(SpeakController.provisionalTranslationDebounce);
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('speak.translationText')));
+    await tester.pump();
+
+    expect(speaker.spoken, isEmpty);
   });
 
   testWidgets('hands-free turns the microphone into a toggle', (tester) async {

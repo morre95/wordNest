@@ -11,6 +11,7 @@ import 'network/api_client.dart';
 import 'sync/sync_api.dart';
 import 'sync/sync_engine.dart';
 import 'db/glossary_repository.dart';
+import 'db/review_repository.dart';
 import 'db/utterance_repository.dart';
 import 'models/language.dart';
 import 'permissions/microphone_permission.dart';
@@ -18,6 +19,8 @@ import 'settings/language_preferences.dart';
 import 'speech/platform_speech_recognizer.dart';
 import 'speech/speech_recognizer.dart';
 import 'translation/backend_translator.dart';
+import 'tts/platform_speaker.dart';
+import 'tts/speaker.dart';
 import 'translation/mlkit_translator.dart';
 import 'translation/translator.dart';
 
@@ -126,4 +129,14 @@ final enrichmentServiceProvider = Provider<EnrichmentService>((ref) {
   );
   ref.onDispose(service.dispose);
   return service;
+});
+
+final reviewRepositoryProvider = Provider<ReviewRepository>(
+  (ref) => ReviewRepository(database: ref.watch(databaseProvider)),
+);
+
+final speakerProvider = Provider<Speaker>((ref) {
+  final speaker = PlatformSpeaker();
+  ref.onDispose(speaker.dispose);
+  return speaker;
 });

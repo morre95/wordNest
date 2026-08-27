@@ -6,6 +6,8 @@ import '../../core/db/glossary_repository.dart';
 import '../../core/models/language.dart';
 import '../../core/providers.dart';
 import '../../core/router.dart';
+import '../review/review_controller.dart';
+import '../review/statistics_sheet.dart';
 import 'glossary_controller.dart';
 import 'widgets/empty_state.dart';
 import 'widgets/glossary_row.dart';
@@ -26,6 +28,12 @@ class GlossaryScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Glossary'),
         actions: [
+          IconButton(
+            key: const Key('glossary.statistics'),
+            tooltip: 'Statistics',
+            icon: const Icon(Icons.insights_outlined),
+            onPressed: () => showGlossaryStatistics(context),
+          ),
           PopupMenuButton<GlossarySort>(
             key: const Key('glossary.sortMenu'),
             initialValue: query.sort,
@@ -49,6 +57,7 @@ class GlossaryScreen extends ConsumerWidget {
           ),
         ],
       ),
+      floatingActionButton: const _ReviewButton(),
       body: Column(
         children: [
           Padding(
@@ -129,6 +138,25 @@ class GlossaryScreen extends ConsumerWidget {
         icon: const Icon(Icons.mic),
         label: const Text('Start speaking'),
       ),
+    );
+  }
+}
+
+/// The way into review, with how many words are waiting. Hidden when there is
+/// nothing to review, so it never invites the user into an empty screen.
+class _ReviewButton extends ConsumerWidget {
+  const _ReviewButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final due = ref.watch(dueCountProvider).value ?? 0;
+    if (due == 0) return const SizedBox.shrink();
+
+    return FloatingActionButton.extended(
+      key: const Key('glossary.startReview'),
+      onPressed: () => context.push(Routes.review),
+      icon: const Icon(Icons.school_outlined),
+      label: Text('Review $due'),
     );
   }
 }

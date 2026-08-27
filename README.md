@@ -158,7 +158,8 @@ one account, registering, pairing, diverging and reconciling.
 4. **Sync** — device registration and tokens, the delta-sync endpoint and
    cursor, the merge module, background triggers, sync status, account upgrade
    and device pairing. *(done)*
-5. Learning — spaced repetition, review mode, difficulty, text-to-speech.
+5. **Learning** — SM-2 scheduling, review mode, difficulty flagging,
+   text-to-speech playback and glossary statistics. *(done)*
 6. Hardening — offline behaviour, error and empty states, accessibility.
 
 Decisions taken along the way are recorded in [DECISIONS.md](DECISIONS.md).

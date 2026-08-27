@@ -218,3 +218,44 @@ thing a migration must never do.
 **Sync never blocks the microphone.** Nothing on the speak path awaits it, a
 failed sync leaves the local database exactly as it was, and the status line
 reports a number of waiting changes rather than an error.
+
+## Milestone 5 — learning
+
+**SM-2, not FSRS.** FSRS needs a fitted model per user and a review history to
+fit it against; a new user has neither. SM-2's behaviour is the same shape for a
+fraction of the machinery. Trade-off: less accurate scheduling for a heavy user;
+the scheduler is a pure module with one entry point, so replacing it later
+touches nothing else.
+
+**Four grades, not SM-2's six.** Forgot / Hard / Good / Easy map to qualities
+1/3/4/5. The finer distinctions in the original scale are not ones a person can
+make reliably about a word they saw a second ago.
+
+**A lapse restarts the ladder but keeps the reduced ease factor.** Resetting the
+ease as well would forget that the word has been failed before and schedule it
+as if it were new.
+
+**Review order is computed in Dart, not SQL.** The priority is a function of the
+current time, the user's flag and the ease factor together. It is expressible in
+SQL, but then the rule would live in two places and only one of them would be
+tested. The query fetches a generous candidate set and the pure
+`reviewPriority` orders it.
+
+**An explicit flag outranks any amount of overdue-ness.** A user who says a word
+is hard has told us something no amount of review data can infer. A flagged word
+is also offered even when its schedule says it is not due.
+
+**A forgotten card is not re-queued within the session.** SM-2 schedules it for
+tomorrow. Drilling it twice in one minute teaches recognition, not recall.
+
+**A provisional translation cannot be spoken.** It is about to be replaced, and
+hearing it would teach the wrong pronunciation. The speaker icon appears only
+once the translation has settled.
+
+**Text-to-speech runs a shade slower than the platform default (rate 0.45).**
+This is a pronunciation model; the point is to be imitable.
+
+**Review state was already in the schema.** Milestone 2 put `interval_days`,
+`ease_factor`, `repetition_count`, `due_at` and `last_reviewed_at` on the first
+migration, and milestone 4 wrote their merge rules, so this milestone added no
+migration and no sync work — which is why it came after sync rather than before.

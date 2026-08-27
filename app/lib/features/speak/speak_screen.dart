@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/models/language.dart';
+import '../../core/providers.dart';
 import '../../core/router.dart';
+import '../../core/tts/speaker.dart';
 import '../../core/speech/speech_recognizer.dart';
 import 'speak_controller.dart';
 import 'speak_state.dart';
@@ -81,7 +83,15 @@ class SpeakScreen extends ConsumerWidget {
               Expanded(
                 child: Center(
                   child: SingleChildScrollView(
-                    child: TranscriptPanel(state: state),
+                    child: TranscriptPanel(
+                      state: state,
+                      onSpeakTranslation: () => _speakTranslation(
+                        context,
+                        ref,
+                        state.translationText,
+                        state.pair.target,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -103,6 +113,28 @@ class SpeakScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Speaks the translation so the user can hear the target-language
+  /// pronunciation. Failures are a snack bar, never an interruption.
+  Future<void> _speakTranslation(
+    BuildContext context,
+    WidgetRef ref,
+    String text,
+    Language language,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(speakerProvider).speak(text, languageCode: language.code);
+    } on SpeakerFailure {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'This device has no ${language.name} voice installed yet.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _pickLanguage(
