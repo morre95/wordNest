@@ -61,6 +61,11 @@ class SyncStatusTile extends StatelessWidget {
 
   String _title() {
     if (status.isRunning) return 'Syncing…';
+    // Never synced is not the same as nothing to sync, and saying the wrong one
+    // is how a user comes to distrust the whole line.
+    if (status.phase == SyncPhase.idle && state?.lastSyncedAt == null) {
+      return 'Not synced yet';
+    }
     if (status.phase == SyncPhase.failed) {
       final pending = status.pendingChanges;
       final waiting = pending == 0

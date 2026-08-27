@@ -91,6 +91,7 @@ class SpeakScreen extends ConsumerWidget {
                         state.translationText,
                         state.pair.target,
                       ),
+                      onToggleFlag: controller.toggleLastUtteranceFlag,
                     ),
                   ),
                 ),
@@ -106,7 +107,10 @@ class SpeakScreen extends ConsumerWidget {
                     : controller.startListening(mode: ListeningMode.continuous),
               ),
               const SizedBox(height: 12),
-              _PrivacyLine(isOnDevice: state.isRecognitionOnDevice),
+              _PrivacyLine(
+                isOnDevice: state.isRecognitionOnDevice,
+                onTap: () => context.push(Routes.privacy),
+              ),
               const SizedBox(height: 12),
             ],
           ),
@@ -168,9 +172,9 @@ class _HandsFreeToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      toggled: isHandsFree,
-      label: 'Hands-free listening',
+    // Merged so the switch and its label are one node: on its own the switch
+    // announces "on"/"off" with no idea what it toggles.
+    return MergeSemantics(
       child: Row(
         children: [
           const Text('Hands-free'),
@@ -185,42 +189,55 @@ class _HandsFreeToggle extends StatelessWidget {
   }
 }
 
-/// The privacy guarantee, in plain language, on the screen where it matters.
+/// The privacy guarantee, in plain language, on the screen where it matters —
+/// and the way into the full explanation.
 class _PrivacyLine extends StatelessWidget {
-  const _PrivacyLine({required this.isOnDevice});
+  const _PrivacyLine({required this.isOnDevice, required this.onTap});
 
   final bool isOnDevice;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final text = isOnDevice
+        ? 'Your voice stays on this device. Nothing is recorded.'
+        : 'Recognised by your phone online. Nothing is recorded.';
+
     return Semantics(
-      label: isOnDevice
-          ? 'Your voice is processed on this device and never recorded or saved.'
-          : 'This language is recognised by your phone using its online '
-              'recogniser. Nothing is recorded or saved.',
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            isOnDevice ? Icons.lock_outline : Icons.cloud_outlined,
-            size: 14,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              isOnDevice
-                  ? 'Your voice stays on this device. Nothing is recorded.'
-                  : 'Recognised by your phone online. Nothing is recorded.',
-              key: const Key('speak.privacyLine'),
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+      button: true,
+      label: '$text Double tap to read more.',
+      child: ExcludeSemantics(
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  isOnDevice ? Icons.lock_outline : Icons.cloud_outlined,
+                  size: 14,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    text,
+                    key: const Key('speak.privacyLine'),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      decoration: TextDecoration.underline,
+                      decorationColor: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }

@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth_api.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/providers.dart';
+import '../../core/router.dart';
+import 'package:go_router/go_router.dart';
+
 import '../glossary/widgets/empty_state.dart';
 import 'settings_controller.dart';
 import 'widgets/pairing_dialogs.dart';
@@ -31,7 +34,20 @@ class SettingsScreen extends ConsumerWidget {
               onRetry: () => ref.read(syncEngineProvider).synchronise(),
             ),
           const _SectionHeader('Your words'),
-          if (session == null)
+          if (status?.failure == ApiFailureKind.unauthenticated)
+            ListTile(
+              key: const Key('settings.signedOut'),
+              leading: Icon(
+                Icons.lock_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: const Text('This device has been signed out'),
+              subtitle: const Text(
+                'Your words are still here and still working. To sync again, '
+                'pair with another device or open a fresh link from your email.',
+              ),
+            )
+          else if (session == null)
             const ListTile(
               leading: Icon(Icons.wifi_off_outlined),
               title: Text('Not connected yet'),
@@ -76,14 +92,16 @@ class SettingsScreen extends ConsumerWidget {
           const _SectionHeader('Devices'),
           _DeviceList(),
           const _SectionHeader('Privacy'),
-          const ListTile(
-            leading: Icon(Icons.mic_none_outlined),
-            title: Text('Your voice is never recorded'),
-            subtitle: Text(
+          ListTile(
+            key: const Key('settings.privacy'),
+            leading: const Icon(Icons.mic_none_outlined),
+            title: const Text('Your voice is never recorded'),
+            subtitle: const Text(
               'Speech is turned into text on this device. No audio is saved to '
-              'disk, uploaded, or kept after the words are recognised. Only '
-              'text is stored or sent.',
+              'disk, uploaded, or kept after the words are recognised.',
             ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push(Routes.privacy),
           ),
           const SizedBox(height: 24),
         ],
@@ -160,6 +178,17 @@ class _DeviceList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final devices = ref.watch(devicesProvider);
+
+    // The error branch comes first: an AsyncValue can be loading *and* carry a
+    // previous error, and showing the spinner in that case hides a failure the
+    // user needs to know about behind something that looks like progress.
+    if (devices.hasError) {
+      return const ListTile(
+        leading: Icon(Icons.cloud_off_outlined),
+        title: Text('Your devices could not be listed'),
+        subtitle: Text('This needs a connection. Nothing is lost.'),
+      );
+    }
 
     return devices.when(
       loading: () => const Padding(

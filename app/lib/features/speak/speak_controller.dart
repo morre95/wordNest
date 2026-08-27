@@ -183,6 +183,7 @@ class SpeakController extends Notifier<SpeakState> {
         state = state.copyWith(
           sourceText: text,
           savedUtteranceId: null,
+          isLastUtteranceFlagged: false,
           status: state.mode == ListeningMode.continuous
               ? SpeakStatus.listening
               : SpeakStatus.idle,
@@ -292,11 +293,19 @@ class SpeakController extends Notifier<SpeakState> {
     }
   }
 
-  /// Marks the utterance just spoken as one the user found hard.
-  Future<void> flagLastUtterance() async {
+  /// Marks the sentence just spoken as one the user found hard.
+  ///
+  /// The other explicit difficulty signal, alongside starring a single word:
+  /// sometimes it is the whole construction that was difficult, not any one
+  /// word in it.
+  Future<void> toggleLastUtteranceFlag() async {
     final id = state.savedUtteranceId;
     if (id == null) return;
-    await _utterances.setFlagged(id, isFlagged: true);
+    final flagged = !state.isLastUtteranceFlagged;
+    await _utterances.setFlagged(id, isFlagged: flagged);
+    if (state.savedUtteranceId == id) {
+      state = state.copyWith(isLastUtteranceFlagged: flagged);
+    }
   }
 
   // --- Permission ---------------------------------------------------------

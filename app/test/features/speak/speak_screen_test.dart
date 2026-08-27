@@ -195,6 +195,26 @@ void main() {
     expect(speaker.spoken, isEmpty);
   });
 
+  testWidgets('a whole sentence can be marked hard once it is saved',
+      (tester) async {
+    // The other explicit difficulty signal: sometimes the construction was
+    // hard rather than any one word in it.
+    await pumpSpeakScreen(tester);
+    await tester.tap(find.byType(MicButton));
+    await tester.pump();
+    expect(find.byKey(const Key('speak.flagUtterance')), findsNothing);
+
+    recognizer.emitFinal('the bakery is closed');
+    for (var index = 0; index < 6; index++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    await tester.tap(find.byKey(const Key('speak.flagUtterance')));
+    await tester.pump();
+
+    expect(find.text('Marked as hard'), findsOneWidget);
+  });
+
   testWidgets('hands-free turns the microphone into a toggle', (tester) async {
     await pumpSpeakScreen(tester);
 

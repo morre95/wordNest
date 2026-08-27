@@ -148,6 +148,27 @@ cd app && flutter test integration_check --tags contract \
 `two_devices_test.dart` is milestone 4's acceptance check: two installs sharing
 one account, registering, pairing, diverging and reconciling.
 
+## What is handled when things go wrong
+
+Each of these has a test, because each one is a state a real user reaches:
+
+| Situation | What happens |
+|---|---|
+| Microphone denied | An inline banner; the button still works and asks again |
+| Denied permanently | The banner offers the system settings screen |
+| No recogniser, or none for the language | Said plainly; the rest of the app is unaffected |
+| Nothing heard | "I didn't catch that" — not an error |
+| Offline translation model missing | The banner offers the download, with progress |
+| Backend unreachable or slow | Nothing is shown. The on-device translation stands and the row is queued |
+| Backend refuses a sentence | Marked failed so the queue stops carrying it |
+| Empty glossary | Explains what fills it, with a way back to the microphone |
+| Filters match nothing | Offers to clear them |
+| Session expired | Renewed before the request, not after a rejection |
+| Session revoked | The install registers again; nothing local is lost |
+| Sync push rejected | Reported per row; the rest of the batch still lands |
+| Pairing code wrong or expired | Says which, and how to get a new one |
+| No network at all | Every screen works; settings says so rather than showing an error |
+
 ## Milestones
 
 1. **Vertical slice** — permission, live on-device recognition, on-device
@@ -160,6 +181,9 @@ one account, registering, pairing, diverging and reconciling.
    and device pairing. *(done)*
 5. **Learning** — SM-2 scheduling, review mode, difficulty flagging,
    text-to-speech playback and glossary statistics. *(done)*
-6. Hardening — offline behaviour, error and empty states, accessibility.
+6. **Hardening** — offline behaviour on every screen, error and empty states
+   including sync failure and an expired session, accessibility guidelines as
+   tests, the privacy explanation screen, and the automated audio-persistence
+   checks. *(done)*
 
 Decisions taken along the way are recorded in [DECISIONS.md](DECISIONS.md).

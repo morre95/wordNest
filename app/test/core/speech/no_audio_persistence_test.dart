@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wordnest/core/db/database.dart';
 import 'package:wordnest/features/speak/speak_controller.dart';
 import 'package:wordnest/features/speak/speak_screen.dart';
 import 'package:wordnest/features/speak/widgets/mic_button.dart';
@@ -64,6 +65,22 @@ void main() {
 
       expect(offences, isEmpty,
           reason: 'Audio must never reach storage or the network.');
+    });
+
+    test('no other part of the app imports the recogniser', () {
+      // The audio pipeline is the boundary. If another file imported
+      // `speech_to_text` directly, it could open a second recognition session
+      // outside every guarantee this directory makes.
+      final offenders = <String>[];
+      for (final entity in Directory('lib').listSync(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        if (entity.path.startsWith(audioPipeline.path)) continue;
+        if (entity.readAsStringSync().contains('package:speech_to_text')) {
+          offenders.add(entity.path);
+        }
+      }
+
+      expect(offenders, isEmpty);
     });
 
     test('never names a file API', () {
@@ -173,5 +190,60 @@ void main() {
         reason: 'A recognition session wrote unexpected files.',
       );
     });
+
+    testWidgets('a whole session, saved and enriched, writes no audio',
+        (tester) async {
+      // The full loop this time: speak, finalise, save to the database, and
+      // let the backend enrichment run. The database file is permitted; an
+      // audio file of any kind is not.
+      final recognizer = FakeSpeechRecognizer();
+      final database = WordNestDatabase.memory();
+      addTearDown(database.close);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: speakOverrides(
+            recognizer: recognizer,
+            translator: FakeTranslator(),
+            database: database,
+          ),
+          child: const MaterialApp(home: SpeakScreen()),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byType(MicButton));
+      await tester.pump();
+      recognizer
+        ..emitSoundLevel(0.9)
+        ..emitPartial('the bakery')
+        ..emitFinal('the bakery is closed');
+      for (var index = 0; index < 6; index++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+
+      final everything = [...filesUnder(documents), ...filesUnder(cache)];
+      expect(
+        everything.where((file) => !isPermitted(file)).map((f) => f.path),
+        isEmpty,
+      );
+      expect(
+        everything.where((file) => _looksLikeAudio(file.path)),
+        isEmpty,
+        reason: 'nothing that could hold a recording may exist',
+      );
+    });
   });
+}
+
+/// Extensions and names that would betray a recording, whatever it was called.
+bool _looksLikeAudio(String path) {
+  const audioExtensions = [
+    '.wav', '.mp3', '.m4a', '.aac', '.caf', '.pcm', '.opus', '.ogg',
+    '.flac', '.amr', '.3gp', '.raw',
+  ];
+  final lower = path.toLowerCase();
+  return audioExtensions.any(lower.endsWith) ||
+      lower.contains('audio') ||
+      lower.contains('record');
 }

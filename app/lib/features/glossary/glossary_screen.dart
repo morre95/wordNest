@@ -75,7 +75,16 @@ class GlossaryScreen extends ConsumerWidget {
           ),
           _FilterBar(query: query, controller: controller),
           Expanded(
-            child: entries.when(
+            // The error branch first: an AsyncValue can be loading *and* carry
+            // a previous error, and a spinner would hide the failure behind
+            // something that looks like progress.
+            child: entries.hasError
+                ? EmptyState(
+                    icon: Icons.error_outline,
+                    title: 'Your glossary could not be read',
+                    message: '${entries.error}',
+                  )
+                : entries.when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (error, _) => EmptyState(
                 icon: Icons.error_outline,

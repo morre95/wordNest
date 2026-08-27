@@ -47,6 +47,13 @@ final syncStateProvider = StreamProvider.autoDispose<SyncState>(
 
 /// The devices signed in to this account. Refetched, not streamed: the list
 /// only changes when the user does something.
+///
+/// Automatic retry is off. Riverpod's default is to retry a failed provider
+/// with backoff while staying in a loading state, which on a device with no
+/// network means a spinner that never resolves — the user is told nothing, and
+/// the screen looks broken. Failing visibly is the honest answer; the list is
+/// refetched when the user does something that would change it.
 final devicesProvider = FutureProvider.autoDispose<List<DeviceSummary>>(
   (ref) => ref.watch(sessionManagerProvider).listDevices(),
+  retry: (retryCount, error) => null,
 );

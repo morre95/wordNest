@@ -259,3 +259,37 @@ This is a pronunciation model; the point is to be imitable.
 `ease_factor`, `repetition_count`, `due_at` and `last_reviewed_at` on the first
 migration, and milestone 4 wrote their merge rules, so this milestone added no
 migration and no sync work — which is why it came after sync rather than before.
+
+## Milestone 6 — hardening
+
+**Riverpod 3 retries failed async providers by default, and that hid failures.**
+A provider whose future fails stays in `AsyncLoading` while it retries with
+backoff, so a device with no network showed a spinner that never resolved and
+told the user nothing. Two changes: automatic retry is off for the device list
+and the statistics, and every `AsyncValue` branch checks `hasError` *before*
+`loading`, because an `AsyncValue` can be both and a spinner would hide the
+failure behind something that looks like progress.
+
+**A screen that has never synced says "Not synced yet", not "Everything is
+synced".** They are different facts, and saying the wrong one is how a user
+comes to distrust the whole line.
+
+**The privacy guarantee has its own screen, reachable from the line that makes
+it.** Every sentence on it is a specific claim the code holds up, rather than
+"we may collect" boilerplate; the claims about audio are the ones the automated
+guard enforces.
+
+**The audio guard now also asserts that nothing outside `core/speech` imports
+the recogniser.** Another file importing `speech_to_text` could open a second
+session outside every guarantee that directory makes. The filesystem check was
+extended to a full save-and-enrich session and to anything that *looks* like
+audio by extension or name, not just to unexpected files.
+
+**Accessibility is a test, not a review.** Every screen is checked against
+Flutter's four guidelines — Android and iOS tap targets, labelled tap targets
+and text contrast. It found a real gap: the hands-free switch announced
+"on"/"off" with no idea what it toggled, and is now merged with its label.
+
+**Sentences can be flagged as hard, not only words.** The specification asks for
+an explicit signal on "any word or sentence"; the controller had the method and
+nothing called it, which is the same as not having the feature.

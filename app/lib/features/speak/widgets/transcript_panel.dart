@@ -12,11 +12,13 @@ class TranscriptPanel extends StatelessWidget {
   const TranscriptPanel({
     required this.state,
     required this.onSpeakTranslation,
+    required this.onToggleFlag,
     super.key,
   });
 
   final SpeakState state;
   final VoidCallback onSpeakTranslation;
+  final VoidCallback onToggleFlag;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +42,23 @@ class TranscriptPanel extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
+        if (state.savedUtteranceId != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('speak.flagUtterance'),
+              onPressed: onToggleFlag,
+              icon: Icon(
+                state.isLastUtteranceFlagged ? Icons.star : Icons.star_border,
+                size: 18,
+              ),
+              label: Text(
+                state.isLastUtteranceFlagged
+                    ? 'Marked as hard'
+                    : 'That one was hard',
+              ),
+            ),
+          ),
         if (state.translationText.isNotEmpty)
           Semantics(
             button: !state.isTranslationProvisional,

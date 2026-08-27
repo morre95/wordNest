@@ -23,8 +23,8 @@ class FakeAuthApi implements AuthApi {
 
   String accountId;
 
-  /// When set, [registerDevice] throws this — a first launch with no network.
-  ApiException? registrationFailure;
+  /// When set, every call throws it — the app with no network.
+  ApiException? failure;
 
   int registerCount = 0;
   int refreshCount = 0;
@@ -45,22 +45,29 @@ class FakeAuthApi implements AuthApi {
     required String displayName,
     required String platform,
   }) async {
-    if (registrationFailure != null) throw registrationFailure!;
+    _check();
     registerCount++;
     return _session(deviceId);
   }
 
   @override
   Future<Session> refresh(String refreshToken) async {
+    _check();
     refreshCount++;
     return _session('device-1');
   }
 
   @override
-  Future<List<DeviceSummary>> listDevices() async => const [];
+  Future<List<DeviceSummary>> listDevices() async {
+    _check();
+    return const [];
+  }
 
   @override
-  Future<void> revokeDevice(String deviceId) async => revoked.add(deviceId);
+  Future<void> revokeDevice(String deviceId) async {
+    _check();
+    revoked.add(deviceId);
+  }
 
   @override
   Future<PairingCode> createPairingCode() async => PairingCode(
@@ -77,6 +84,10 @@ class FakeAuthApi implements AuthApi {
 
   @override
   Future<Session> redeemMagicLink(String token) async => _session('device-1');
+
+  void _check() {
+    if (failure != null) throw failure!;
+  }
 }
 
 class FakeDeviceIdentity implements DeviceIdentity {

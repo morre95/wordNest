@@ -58,6 +58,10 @@ abstract class SpeakState with _$SpeakState {
     /// The row the last finalised utterance was saved as. Lets the screen flag
     /// what was just said, and gives the backend queue something to enrich.
     String? savedUtteranceId,
+
+    /// Whether the user has marked the sentence just said as one they found
+    /// hard. Reset with each new utterance.
+    @Default(false) bool isLastUtteranceFlagged,
     SpeakNotice? notice,
   }) = _SpeakState;
 

@@ -2,6 +2,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/glossary/glossary_entry_screen.dart';
 import '../features/glossary/glossary_screen.dart';
+import '../features/privacy/privacy_screen.dart';
 import '../features/review/review_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/speak/speak_screen.dart';
@@ -16,6 +17,8 @@ abstract final class Routes {
 
   static String glossaryEntry(String id) => '/glossary/$id';
 
+  static const privacy = '/privacy';
+
   static const review = '/review';
 
   static const settings = '/settings';
@@ -27,6 +30,10 @@ GoRouter buildRouter() => GoRouter(
         GoRoute(
           path: Routes.speak,
           builder: (context, state) => const SpeakScreen(),
+        ),
+        GoRoute(
+          path: Routes.privacy,
+          builder: (context, state) => const PrivacyScreen(),
         ),
         GoRoute(
           path: Routes.review,
