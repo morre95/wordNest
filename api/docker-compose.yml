@@ -35,9 +35,15 @@ services:
       POSTGRES_USER: wordnest
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wordnest-dev}
     ports:
-      - "5432:5432"
+      # Published for a psql client on the host, not for the API — that talks
+      # over the compose network. 5433 by default because a developer machine
+      # very often already has Postgres on 5432.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - wordnest-db:/var/lib/postgresql/data
+      # Mounted at /var/lib/postgresql, not .../data: that is what the
+      # postgres:18 image expects, and it is what makes a later `pg_upgrade
+      # --link` possible without a mount-point boundary in the way.
+      - wordnest-db:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wordnest -d wordnest"]
       interval: 5s

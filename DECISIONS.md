@@ -293,3 +293,12 @@ and text contrast. It found a real gap: the hands-free switch announced
 **Sentences can be flagged as hard, not only words.** The specification asks for
 an explicit signal on "any word or sentence"; the controller had the method and
 nothing called it, which is the same as not having the feature.
+
+**Compose publishes Postgres on 5433, not 5432.** Only for a psql client on the
+host — the API reaches it over the compose network. A developer machine very
+often already has Postgres on 5432, and a default that fails there is a bad
+default. Override with `POSTGRES_PORT`.
+
+**The Postgres volume is mounted at `/var/lib/postgresql`, not `.../data`.**
+That is what the `postgres:18` image expects, and it is what makes a later
+`pg_upgrade --link` possible without a mount-point boundary in the way.
