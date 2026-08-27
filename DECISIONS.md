@@ -302,3 +302,53 @@ default. Override with `POSTGRES_PORT`.
 **The Postgres volume is mounted at `/var/lib/postgresql`, not `.../data`.**
 That is what the `postgres:18` image expects, and it is what makes a later
 `pg_upgrade --link` possible without a mount-point boundary in the way.
+
+## Completing the API surface
+
+**Glossary and review-log endpoints exist for a client the app is not.** The app
+is local-first and reads its own Drift database, so it calls neither. They were
+in the specification's list of operations and I had skipped them, which left no
+way to read a glossary without speaking the sync protocol — no export, no web
+view, no third-party client. Trade-off: two endpoint families with no in-app
+caller, against an API that is only usable by one implementation.
+
+**Every write through these endpoints takes a sequence number.** That is the
+whole difficulty: a REST edit that only set `updated_at` would sit in the
+database below every device's cursor and never be pulled. Flagging a word over
+HTTP is now indistinguishable from flagging it through sync, and there is a test
+that pulls from a second device to prove it.
+
+**Only `is_flagged` is writable on a glossary entry.** Scheduling state is a
+consequence of a review, not something to be typed in; allowing it to be set
+directly would let a client write a schedule the algorithm never produced. The
+`repetition_count` is derived server-side from the grade for the same reason.
+
+**The glossary pages by offset, the review log by cursor.** The glossary is a
+searchable, sortable, bounded list — offset is what a reader expects and what
+lets them jump. The review log is an append-only timeline where rows arrive
+while someone is paging, and an offset would shift underneath them.
+
+**Recording a review is idempotent and cannot move a schedule backwards.** Keyed
+on the client-generated id, so a retry is a no-op. A review that arrives late
+from a device that was offline is kept as an event — it happened — but the
+schedule follows whichever review is most recent, exactly as the merge module
+decides it during sync.
+
+**Streaming translation reads partial JSON rather than parsing it.** Structured
+output means the model emits a JSON document, so there is no prose to stream;
+`extract_partial_string` walks the growing buffer and pulls out the
+`translation` field before the document is valid. It withholds a trailing
+incomplete escape rather than guessing, because emitting a lone backslash and
+correcting it a chunk later is a flicker the reader sees.
+
+**The stream validates before it responds.** Language pair and rate limit are
+checked before the status line is sent; after that a refusal could only be an
+event nobody is obliged to read. A provider failure *after* that point becomes
+an `error` event followed by `done`, because a stream that simply stops leaves a
+reader waiting for something that will never come.
+
+**The app does not consume the stream.** It shows an on-device translation
+immediately, so there is nothing for streaming to improve — the specification
+asked to "consider" it "if it improves perceived latency", and here it does not.
+It is there for a client with no on-device model, where the wait would otherwise
+be silent.

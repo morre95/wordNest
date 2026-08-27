@@ -6,7 +6,9 @@ marks each word so a reader can see at a glance that this is not the real thing.
 """
 
 import re
+from collections.abc import AsyncIterator
 
+from .provider import TranslationDelta
 from .schemas import TranslatedToken, TranslationBreakdown
 
 # Letters, with internal apostrophes and hyphens kept: "that's",
@@ -62,6 +64,10 @@ _FUNCTION_WORDS = frozenset(
 
 
 class FakeTranslationProvider:
+    #: How many characters each streamed delta carries. Small enough that a
+    #: test sees several of them for a short sentence.
+    stream_chunk_size = 4
+
     async def translate(
         self,
         *,
@@ -86,3 +92,27 @@ class FakeTranslationProvider:
                 for word in words
             ],
         )
+
+    async def stream_translate(
+        self,
+        *,
+        source_text: str,
+        source_language_name: str,
+        target_language_name: str,
+    ) -> AsyncIterator[TranslationDelta | TranslationBreakdown]:
+        """Streams the same answer [translate] gives, in fixed-size pieces.
+
+        Deterministic in both content and chunking, so a test can assert on the
+        exact sequence of deltas rather than on their sum.
+        """
+        breakdown = await self.translate(
+            source_text=source_text,
+            source_language_name=source_language_name,
+            target_language_name=target_language_name,
+        )
+        translation = breakdown.translation
+        for start in range(0, len(translation), self.stream_chunk_size):
+            yield TranslationDelta(
+                text=translation[start : start + self.stream_chunk_size]
+            )
+        yield breakdown

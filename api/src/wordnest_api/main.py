@@ -17,7 +17,9 @@ from .core.logging import configure_logging, register_request_logging
 from .core.rate_limit import TokenBucketRateLimiter
 from .features.auth.email_sender import build_email_sender
 from .features.auth.router import router as auth_router
+from .features.glossary.router import router as glossary_router
 from .features.health.router import router as health_router
+from .features.review.router import router as review_router
 from .features.sync.router import router as sync_router
 from .features.translation.provider import build_translation_provider
 from .features.translation.router import router as translation_router
@@ -83,6 +85,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(translation_router, prefix=API_PREFIX)
     app.include_router(sync_router, prefix=API_PREFIX)
+    app.include_router(glossary_router, prefix=API_PREFIX)
+    app.include_router(review_router, prefix=API_PREFIX)
     return app
 
 

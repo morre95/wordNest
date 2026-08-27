@@ -148,6 +148,31 @@ cd app && flutter test integration_check --tags contract \
 `two_devices_test.dart` is milestone 4's acceptance check: two installs sharing
 one account, registering, pairing, diverging and reconciling.
 
+## The API
+
+Every response uses one envelope: `{success, data, meta}`, or
+`{success: false, error: {code, message}}`. Interactive docs at `/docs`.
+
+| | |
+|---|---|
+| `POST /api/v1/translations` | Translate an utterance, with a word-level breakdown |
+| `POST /api/v1/translations/stream` | The same, as server-sent events |
+| `POST /api/v1/sync` | Push local changes, pull everything since a cursor |
+| `GET/PATCH/DELETE /api/v1/glossary[/{id}]` | Read and update saved words |
+| `GET /api/v1/glossary/statistics` | Counts across the whole glossary |
+| `GET/POST /api/v1/review-logs` | Read reviews; record one and move its schedule |
+| `POST /api/v1/auth/devices` | Register an install, get an anonymous account |
+| `POST /api/v1/auth/refresh` | Rotate the session |
+| `GET/DELETE /api/v1/auth/devices[/{id}]` | List devices, sign one out |
+| `POST /api/v1/auth/pairing-codes[/redeem]` | Bring in a second device |
+| `POST /api/v1/auth/magic-links[/redeem]` | Attach an email, or join that account |
+| `GET /api/v1/health` | Liveness |
+
+The app itself uses only `/translations`, `/sync` and `/auth/*` — it is
+local-first and reads its own database. The glossary, review-log and streaming
+endpoints are for a client without an on-device store: an export tool, a web
+view, anything where the data cannot be assumed to be there already.
+
 ## What is handled when things go wrong
 
 Each of these has a test, because each one is a state a real user reaches:
