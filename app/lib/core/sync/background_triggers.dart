@@ -3,19 +3,20 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
 
-/// Runs [onTrigger] at the two moments a backlog is most likely to drain: when
-/// the app comes back to the foreground, and when the device regains a network.
+/// Runs background work at the two moments a backlog is most likely to drain:
+/// when the app comes back to the foreground, and when the device regains a
+/// network.
 ///
-/// Kept apart from [EnrichmentService] so the service stays free of platform
+/// Kept apart from the services it triggers so they stay free of platform
 /// plugins and can be tested without either.
-class EnrichmentTriggers with WidgetsBindingObserver {
-  EnrichmentTriggers({
-    required Future<void> Function() drainQueue,
+class BackgroundTriggers with WidgetsBindingObserver {
+  BackgroundTriggers({
+    required List<Future<void> Function()> onTrigger,
     Stream<List<ConnectivityResult>>? connectivity,
-  })  : _onTrigger = drainQueue,
+  })  : _tasks = onTrigger,
         _connectivity = connectivity ?? Connectivity().onConnectivityChanged;
 
-  final Future<void> Function() _onTrigger;
+  final List<Future<void> Function()> _tasks;
   final Stream<List<ConnectivityResult>> _connectivity;
 
   StreamSubscription<List<ConnectivityResult>>? _subscription;
@@ -24,8 +25,8 @@ class EnrichmentTriggers with WidgetsBindingObserver {
   void start() {
     WidgetsBinding.instance.addObserver(this);
     _subscription = _connectivity.listen(_onConnectivityChanged);
-    // Drain whatever accumulated while the app was closed.
-    unawaited(_onTrigger());
+    // Catch up on whatever accumulated while the app was closed.
+    unawaited(_runTasks());
   }
 
   void stop() {
@@ -36,7 +37,16 @@ class EnrichmentTriggers with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(_onTrigger());
+    if (state == AppLifecycleState.resumed) unawaited(_runTasks());
+  }
+
+  /// Sequentially, not concurrently: enrichment writes rows that sync then
+  /// pushes, so doing them in order sends the enriched version rather than the
+  /// rough one followed immediately by a correction.
+  Future<void> _runTasks() async {
+    for (final task in _tasks) {
+      await task();
+    }
   }
 
   void _onConnectivityChanged(List<ConnectivityResult> results) {
@@ -44,7 +54,7 @@ class EnrichmentTriggers with WidgetsBindingObserver {
         results.any((result) => result != ConnectivityResult.none);
     // Only on the transition into having a network: the platform emits this
     // stream on every interface change, and draining on each would be noise.
-    if (hasConnection && !_hadConnection) unawaited(_onTrigger());
+    if (hasConnection && !_hadConnection) unawaited(_runTasks());
     _hadConnection = hasConnection;
   }
 }

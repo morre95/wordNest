@@ -29,6 +29,12 @@ class SpeakScreen extends ConsumerWidget {
         title: const Text('WordNest'),
         actions: [
           IconButton(
+            key: const Key('speak.openSettings'),
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => context.push(Routes.settings),
+          ),
+          IconButton(
             key: const Key('speak.openGlossary'),
             tooltip: 'Glossary',
             icon: const Icon(Icons.menu_book_outlined),

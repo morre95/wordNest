@@ -1,8 +1,15 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'auth/auth_api.dart';
+import 'auth/device_identity.dart';
+import 'auth/session_manager.dart';
+import 'auth/session_store.dart';
 import 'db/database.dart';
+import 'db/sync_repository.dart';
 import 'enrichment/enrichment_service.dart';
 import 'network/api_client.dart';
+import 'sync/sync_api.dart';
+import 'sync/sync_engine.dart';
 import 'db/glossary_repository.dart';
 import 'db/utterance_repository.dart';
 import 'models/language.dart';
@@ -63,7 +70,48 @@ final utteranceRepositoryProvider = Provider<UtteranceRepository>(
   ),
 );
 
-final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
+/// The client and the session manager need each other: the client attaches the
+/// bearer token, and renewing that token is itself a request. The client takes
+/// its token source as a supplier resolved at request time, which breaks the
+/// cycle without either of them holding a half-built object.
+// The explicit variable type is required: these three reference each other,
+// and without it the analyser cannot infer them.
+final Provider<ApiClient> apiClientProvider = Provider<ApiClient>(
+  (ref) => ApiClient(accessTokens: () => ref.read(sessionManagerProvider)),
+);
+
+final Provider<AuthApi> authApiProvider = Provider<AuthApi>(
+  (ref) => HttpAuthApi(ref.watch(apiClientProvider)),
+);
+
+final Provider<SessionManager> sessionManagerProvider =
+    Provider<SessionManager>((ref) {
+  final manager = SessionManager(
+    authApi: ref.watch(authApiProvider),
+    sessionStore: PreferencesSessionStore(),
+    deviceIdentity: PlatformDeviceIdentity(),
+  );
+  ref.onDispose(manager.dispose);
+  return manager;
+});
+
+final syncRepositoryProvider = Provider<SyncRepository>(
+  (ref) => SyncRepository(database: ref.watch(databaseProvider)),
+);
+
+final syncApiProvider = Provider<SyncApi>(
+  (ref) => HttpSyncApi(ref.watch(apiClientProvider)),
+);
+
+final syncEngineProvider = Provider<SyncEngine>((ref) {
+  final engine = SyncEngine(
+    syncApi: ref.watch(syncApiProvider),
+    syncRepository: ref.watch(syncRepositoryProvider),
+    sessionManager: ref.watch(sessionManagerProvider),
+  );
+  ref.onDispose(engine.dispose);
+  return engine;
+});
 
 final backendTranslatorProvider = Provider<BackendTranslator>(
   (ref) => HttpBackendTranslator(ref.watch(apiClientProvider)),

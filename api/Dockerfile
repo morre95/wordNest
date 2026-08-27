@@ -17,6 +17,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY src ./src
 COPY prompts ./prompts
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 

@@ -113,6 +113,7 @@ def test_the_fake_provider_is_refused_in_production() -> None:
     settings = Settings(
         environment=Environment.production,
         translation_provider=TranslationProviderName.fake,
+        jwt_secret="a-real-secret-for-this-test",
     )
 
     with pytest.raises(RuntimeError, match="cannot be used in production"):

@@ -153,3 +153,68 @@ uniqueness the sync merge rules depend on.
 **Body logging is off by default and says so loudly when on.** User sentences in
 an access log are a data-retention problem nobody asked for. Turning it on logs
 a warning that it is on.
+
+## Milestone 4 — sync
+
+**The sync cursor is a per-account server sequence number.** A counter row per
+account, incremented under a row lock inside the same transaction as the writes
+it numbers. Per-account rather than global so one busy account cannot push
+another's cursor forward. The returned cursor is the highest sequence actually
+handed over, never "now", so a row written mid-request is picked up next time
+rather than stepped over.
+
+**The merge rules live in one pure module, twice.** `api/.../sync/merge.py` and
+`app/lib/core/sync/merge.dart` implement the same rules with the same named
+test cases. Trade-off: the same logic in two languages, which can drift; in
+exchange each side can merge without asking the other, which is what makes the
+app work offline. The named cases are the contract between them.
+
+**Utterances have exactly one writer.** A push from a device other than the one
+that recorded the utterance is rejected and reported, not merged. The rejection
+is per row: one bad row must not stop a fortnight of good ones from landing.
+
+**Seen counts are recomputed on both sides after every merge**, never copied.
+Two devices that each heard a word twice offline converge on four.
+
+**Scheduling state moves as one block, decided by `last_reviewed_at`.** Taking
+the interval from one side and the ease factor from the other would produce a
+schedule neither device ever computed. The due date is then recomputed from the
+winning state, so a stale one cannot resurface a word already scheduled out.
+
+**Magic link plus pairing code, no OAuth.** Both were asked for; of the durable
+identities, an emailed link is much the cheapest to operate — no Apple
+developer account, no OAuth client registration, no SDK on either platform. The
+sender is a `Protocol` with a logging implementation that makes the whole
+upgrade flow runnable locally with no provider; `build_email_sender` refuses to
+return it in production, so deploying without wiring a real provider fails at
+startup rather than silently swallowing sign-ins.
+
+**Pairing codes are rate-limited per device, not counted per code.** The first
+design counted a wrong guess against every live code — which would have let one
+attacker invalidate every other user's pairing at will. A blind guesser names no
+code, so the device is the only honest axis to cap on.
+
+**Refresh tokens rotate and reuse is treated as theft.** A token is good exactly
+once; a second use revokes every token for that device. Losing a session is
+better than sharing one.
+
+**Merging accounts renumbers the moved rows.** Every row moved into the target
+account takes a fresh sequence number from that account's counter — otherwise
+devices whose cursors are already past the source's numbering would never see
+any of it. Devices follow their account too, so a third device paired to the
+merged-away account keeps working.
+
+**Every timestamp on the wire states its zone.** SQLite has no time zone type,
+so a row read back from it is naive; serialised as-is, a client an hour off UTC
+parsed it as a different instant — enough to lose a last-write-wins comparison
+and silently drop a change. Found by the two-device test against the real
+service. Fixed on both sides: the server normalises to UTC-aware before
+serialising, and the client reads a zoneless timestamp as UTC instead of local.
+
+**Migrations run as their own compose service, never on API startup.** Several
+API containers starting together would migrate concurrently, which is the one
+thing a migration must never do.
+
+**Sync never blocks the microphone.** Nothing on the speak path awaits it, a
+failed sync leaves the local database exactly as it was, and the status line
+reports a number of waiting changes rather than an error.

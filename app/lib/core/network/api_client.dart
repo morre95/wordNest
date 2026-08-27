@@ -3,11 +3,29 @@ import 'package:dio/dio.dart';
 import 'api_config.dart';
 import 'api_exception.dart';
 
+/// Supplies the bearer token, and renews it when the server says it is stale.
+///
+/// An interface rather than a direct dependency on the session manager, because
+/// the session manager needs the client to do the renewing — this is what keeps
+/// that from being a cycle.
+abstract interface class AccessTokens {
+  /// The token to send, or null when this install has no session yet.
+  Future<String?> current();
+
+  /// Called once after a 401. Returns a fresh token, or null if the session is
+  /// gone for good and the user has to start again.
+  Future<String?> renew();
+}
+
 /// The single HTTP client. Every request the app makes goes through here, so
-/// base URL, timeouts, and error translation are decided once.
+/// base URL, timeouts, authentication and error translation are decided once.
 class ApiClient {
-  ApiClient({Dio? dio})
-      : _dio = dio ??
+  /// [accessTokens] is a supplier rather than a value because the thing that
+  /// holds the token needs this client in order to renew it. Resolving it at
+  /// request time — by which point both exist — is what breaks that cycle.
+  ApiClient({Dio? dio, AccessTokens Function()? accessTokens})
+      : _tokens = accessTokens,
+        _dio = dio ??
             Dio(
               BaseOptions(
                 baseUrl: '${ApiConfig.baseUrl}${ApiConfig.apiPrefix}',
@@ -21,36 +39,84 @@ class ApiClient {
             );
 
   final Dio _dio;
+  final AccessTokens Function()? _tokens;
 
-  /// POSTs [body] and returns the `data` half of the response envelope.
-  ///
-  /// Throws [ApiException] for anything else, already classified.
   Future<Map<String, dynamic>> post(
     String path, {
     required Map<String, dynamic> body,
+    bool authenticated = true,
+  }) {
+    return _send(
+      path,
+      authenticated: authenticated,
+      send: (options) => _dio.post<dynamic>(path, data: body, options: options),
+    );
+  }
+
+  Future<Map<String, dynamic>> get(String path, {bool authenticated = true}) {
+    return _send(
+      path,
+      authenticated: authenticated,
+      send: (options) => _dio.get<dynamic>(path, options: options),
+    );
+  }
+
+  Future<Map<String, dynamic>> delete(
+    String path, {
+    bool authenticated = true,
+  }) {
+    return _send(
+      path,
+      authenticated: authenticated,
+      send: (options) => _dio.delete<dynamic>(path, options: options),
+    );
+  }
+
+  /// Sends, and on an expired session renews once and sends again.
+  ///
+  /// Exactly once: if the renewed token is also refused, the session is gone
+  /// and retrying forever would only hide that.
+  Future<Map<String, dynamic>> _send(
+    String path, {
+    required bool authenticated,
+    required Future<Response<dynamic>> Function(Options options) send,
   }) async {
     try {
-      // Deliberately `dynamic`: a proxy or a load balancer can answer with
-      // HTML, and Dio must not fail casting that before we can classify it.
-      final response = await _dio.post<dynamic>(path, data: body);
+      final response = await send(await _options(authenticated: authenticated));
       return _unwrap(response);
     } on DioException catch (error) {
       throw ApiException.from(error);
+    } on ApiException catch (error) {
+      if (!authenticated || error.kind != ApiFailureKind.unauthenticated) {
+        rethrow;
+      }
+      final renewed = await _tokens?.call().renew();
+      if (renewed == null) rethrow;
+      try {
+        final response = await send(
+          Options(headers: {'Authorization': 'Bearer $renewed'}),
+        );
+        return _unwrap(response);
+      } on DioException catch (error) {
+        throw ApiException.from(error);
+      }
     }
   }
 
-  Future<Map<String, dynamic>> get(String path) async {
-    try {
-      final response = await _dio.get<dynamic>(path);
-      return _unwrap(response);
-    } on DioException catch (error) {
-      throw ApiException.from(error);
-    }
+  Future<Options> _options({required bool authenticated}) async {
+    if (!authenticated) return Options();
+    final token = await _tokens?.call().current();
+    return Options(
+      headers: token == null ? null : {'Authorization': 'Bearer $token'},
+    );
   }
 
   Map<String, dynamic> _unwrap(Response<dynamic> response) {
     final body = response.data;
     final status = response.statusCode ?? 0;
+
+    // 204 has no body by design — a successful delete, for instance.
+    if (status == 204) return const {};
 
     if (status >= 400 || body is! Map || body['success'] != true) {
       throw ApiException.from(

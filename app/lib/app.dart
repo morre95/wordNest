@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'core/enrichment/enrichment_triggers.dart';
+import 'core/sync/background_triggers.dart';
 import 'core/providers.dart';
 import 'core/router.dart';
 import 'core/theme/wordnest_theme.dart';
@@ -16,13 +16,16 @@ class WordNestApp extends ConsumerStatefulWidget {
 class _WordNestAppState extends ConsumerState<WordNestApp> {
   // Built once: rebuilding the router on every frame would reset navigation.
   final _router = buildRouter();
-  late final EnrichmentTriggers _triggers;
+  late final BackgroundTriggers _triggers;
 
   @override
   void initState() {
     super.initState();
-    _triggers = EnrichmentTriggers(
-      drainQueue: ref.read(enrichmentServiceProvider).drainQueue,
+    _triggers = BackgroundTriggers(
+      onTrigger: [
+        ref.read(enrichmentServiceProvider).drainQueue,
+        ref.read(syncEngineProvider).synchronise,
+      ],
     );
     _triggers.start();
   }

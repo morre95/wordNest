@@ -121,14 +121,32 @@ cd app
 flutter run --dart-define=WORDNEST_API_BASE_URL=http://192.168.1.10:8000
 ```
 
-There is also a contract test that runs the app's real HTTP client against a
-running service. It is excluded from the normal test run because it needs one:
+### Migrations
 
 ```bash
-cd app
-flutter test integration_check --tags contract \
+cd api
+uv run alembic upgrade head          # apply
+uv run alembic downgrade -1          # and back, to check it is reversible
+```
+
+`docker compose up` runs them as their own service before the API starts. The
+test suite runs them too, against a fresh SQLite file per test, so they are
+exercised on every run.
+
+### Integration checks
+
+Two suites run the app's real HTTP client against a running service. They are
+excluded from the normal test run because they need one:
+
+```bash
+cd api && docker compose up --build
+cd app && flutter test integration_check --tags contract \
   --dart-define=WORDNEST_API_BASE_URL=http://127.0.0.1:8000
 ```
+
+`backend_contract_test.dart` checks the translation contract.
+`two_devices_test.dart` is milestone 4's acceptance check: two installs sharing
+one account, registering, pairing, diverging and reconciling.
 
 ## Milestones
 
@@ -137,7 +155,9 @@ flutter test integration_check --tags contract \
 2. **Persistence** — Drift schema, saved utterances, glossary screen. *(done)*
 3. **Backend** — FastAPI translation and word extraction, containerised and
    wired into the app. *(done)*
-4. Sync — device registration, delta sync, the merge module, account upgrade.
+4. **Sync** — device registration and tokens, the delta-sync endpoint and
+   cursor, the merge module, background triggers, sync status, account upgrade
+   and device pairing. *(done)*
 5. Learning — spaced repetition, review mode, difficulty, text-to-speech.
 6. Hardening — offline behaviour, error and empty states, accessibility.
 

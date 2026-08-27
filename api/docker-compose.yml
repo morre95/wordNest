@@ -1,17 +1,32 @@
+x-api-environment: &api-environment
+  WORDNEST_ENVIRONMENT: development
+  WORDNEST_TRANSLATION_PROVIDER: ${WORDNEST_TRANSLATION_PROVIDER:-fake}
+  WORDNEST_ANTHROPIC_API_KEY: ${WORDNEST_ANTHROPIC_API_KEY:-}
+  WORDNEST_LOG_LEVEL: ${WORDNEST_LOG_LEVEL:-INFO}
+  WORDNEST_JWT_SECRET: ${WORDNEST_JWT_SECRET:-development-only-do-not-use-in-production}
+  WORDNEST_DATABASE_URL: >-
+    postgresql+asyncpg://wordnest:${POSTGRES_PASSWORD:-wordnest-dev}@db:5432/wordnest
+
 services:
+  # Migrations run as their own step and exit. Never on API startup: several
+  # API containers starting together would migrate concurrently, which is the
+  # one thing a migration must never do.
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: *api-environment
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build: .
     ports:
       - "8000:8000"
-    environment:
-      WORDNEST_ENVIRONMENT: development
-      WORDNEST_TRANSLATION_PROVIDER: ${WORDNEST_TRANSLATION_PROVIDER:-fake}
-      WORDNEST_ANTHROPIC_API_KEY: ${WORDNEST_ANTHROPIC_API_KEY:-}
-      WORDNEST_LOG_LEVEL: ${WORDNEST_LOG_LEVEL:-INFO}
-      # Postgres arrives with sync in milestone 4.
+    environment: *api-environment
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   db:
     image: postgres:18-alpine

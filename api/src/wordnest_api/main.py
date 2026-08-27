@@ -11,10 +11,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import Settings, get_settings
+from .core.db.session import create_engine, create_session_factory
 from .core.errors import register_error_handlers
 from .core.logging import configure_logging, register_request_logging
 from .core.rate_limit import TokenBucketRateLimiter
+from .features.auth.email_sender import build_email_sender
+from .features.auth.router import router as auth_router
 from .features.health.router import router as health_router
+from .features.sync.router import router as sync_router
 from .features.translation.provider import build_translation_provider
 from .features.translation.router import router as translation_router
 
@@ -33,7 +37,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.translation_rate_limiter = TokenBucketRateLimiter(
             limit_per_minute=settings.translation_rate_limit_per_minute
         )
-        yield
+        # A separate bucket from translation: guessing a pairing code and
+        # translating a sentence are different budgets.
+        app.state.pairing_rate_limiter = TokenBucketRateLimiter(
+            limit_per_minute=settings.pairing_redemptions_per_minute
+        )
+        app.state.email_sender = build_email_sender(settings.is_production)
+        engine = create_engine(settings)
+        app.state.engine = engine
+        app.state.session_factory = create_session_factory(engine)
+        try:
+            yield
+        finally:
+            await engine.dispose()
 
     app = FastAPI(
         title="wordnest-api",
@@ -64,7 +80,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_error_handlers(app)
 
     app.include_router(health_router, prefix=API_PREFIX)
+    app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(translation_router, prefix=API_PREFIX)
+    app.include_router(sync_router, prefix=API_PREFIX)
     return app
 
 

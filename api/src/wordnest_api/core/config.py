@@ -8,7 +8,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +38,28 @@ class Settings(BaseSettings):
 
     environment: Environment = Environment.development
 
+    #: Postgres in production, SQLite for local development and tests. Both are
+    #: driven through SQLAlchemy's async API, so the code path is identical.
+    database_url: str = "sqlite+aiosqlite:///./wordnest.db"
+
+    #: Signs access tokens. A development default exists so the service starts
+    #: out of the box; `_reject_dev_secret_in_production` refuses it in
+    #: production, where a predictable signing key would let anyone mint a
+    #: token for anyone's account.
+    jwt_secret: str = "development-only-do-not-use-in-production"  # noqa: S105
+    access_token_lifetime_minutes: int = 15
+    refresh_token_lifetime_days: int = 90
+
+    #: A pairing code is six digits — little entropy — so its safety comes from
+    #: expiring fast and from a cap on how fast one device may guess.
+    pairing_code_lifetime_minutes: int = 10
+    pairing_redemptions_per_minute: int = 5
+    magic_link_lifetime_minutes: int = 20
+
+    #: Rows accepted or returned in one sync page. Capped so a device coming
+    #: back after a fortnight cannot ask for everything at once.
+    sync_batch_limit: int = 500
+
     #: Origins allowed to call the API from a browser. A mobile client sends no
     #: Origin header, so this list stays empty in production unless a web
     #: client exists — never "*".
@@ -66,6 +88,14 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment is Environment.production
+
+    @model_validator(mode="after")
+    def _reject_dev_secret_in_production(self) -> "Settings":
+        if self.is_production and self.jwt_secret.startswith("development-only"):
+            raise ValueError(
+                "WORDNEST_JWT_SECRET must be set to a real secret in production."
+            )
+        return self
 
 
 @lru_cache
