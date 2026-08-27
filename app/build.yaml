@@ -8,3 +8,9 @@ targets:
           # second precision would make ties common, and ties have no correct
           # answer. Text storage keeps milliseconds and is unambiguous about UTC.
           store_date_time_values_as_text: true
+      json_serializable:
+        options:
+          # The API speaks snake_case; Dart speaks camelCase. Converting here
+          # keeps the wire format out of the model definitions.
+          field_rename: snake
+          create_to_json: true

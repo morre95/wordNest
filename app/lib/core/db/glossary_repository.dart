@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../clock.dart';
 import '../ids/id_generator.dart';
+import '../translation/remote_translation.dart';
 import '../vocabulary/vocabulary_extractor.dart';
 import 'database.dart';
 
@@ -148,6 +149,138 @@ class GlossaryRepository {
     await (_db.update(_db.glossaryEntries)
           ..where((row) => row.id.equals(entryId)))
         .write(GlossaryEntriesCompanion(seenCount: Value(total)));
+  }
+
+  /// Replaces the offline guesses for one utterance's words with the backend's
+  /// lemmas, parts of speech and target-language forms.
+  ///
+  /// Two things make this more than a field update. The backend's lemma is
+  /// often not what the offline extractor guessed ("opens" becomes "open"), so
+  /// the entry has to be re-keyed; and re-keying can collide with an entry that
+  /// already exists for the real lemma, in which case the two are one word and
+  /// must become one row. Function words the backend identifies are dropped —
+  /// the offline extractor keeps some, and they are not vocabulary.
+  Future<void> applyEnrichment(
+    Utterance utterance,
+    List<TranslatedToken> tokens,
+  ) async {
+    if (tokens.isEmpty) return;
+    final now = _now();
+
+    await _db.transaction(() async {
+      for (final token in tokens) {
+        final guessedLemma = token.surfaceForm.toLowerCase();
+        final entry = await _entryFor(guessedLemma, utterance);
+        if (entry == null) continue;
+
+        if (!token.isContentWord) {
+          await _removeEntry(entry.id, now);
+          continue;
+        }
+
+        final realLemma = token.lemma.toLowerCase();
+        final collision = realLemma == entry.lemma
+            ? null
+            : await _entryFor(realLemma, utterance);
+
+        if (collision != null) {
+          await _mergeInto(collision.id, entry.id, now);
+          await _describe(collision.id, token, now);
+          await recomputeSeenCount(collision.id);
+        } else {
+          await _describe(entry.id, token, now, lemma: realLemma);
+        }
+      }
+    });
+  }
+
+  Future<GlossaryEntry?> _entryFor(String lemma, Utterance utterance) {
+    return (_db.select(_db.glossaryEntries)
+          ..where((row) =>
+              row.lemma.equals(lemma) &
+              row.sourceLanguage.equals(utterance.sourceLanguage) &
+              row.targetLanguage.equals(utterance.targetLanguage) &
+              row.deletedAt.isNull()))
+        .getSingleOrNull();
+  }
+
+  /// Writes the backend's description of a word onto an entry.
+  Future<void> _describe(
+    String entryId,
+    TranslatedToken token,
+    DateTime now, {
+    String? lemma,
+  }) async {
+    await (_db.update(_db.glossaryEntries)
+          ..where((row) => row.id.equals(entryId)))
+        .write(
+      GlossaryEntriesCompanion(
+        lemma: lemma == null ? const Value.absent() : Value(lemma),
+        partOfSpeech: Value(token.partOfSpeech),
+        targetForm: Value(token.targetForm),
+        updatedAt: Value(now),
+        dirty: const Value(true),
+      ),
+    );
+  }
+
+  /// Moves [sourceId]'s occurrences onto [targetId] and tombstones the source.
+  Future<void> _mergeInto(
+    String targetId,
+    String sourceId,
+    DateTime now,
+  ) async {
+    final moving = await (_db.select(_db.glossaryOccurrences)
+          ..where((row) => row.glossaryEntryId.equals(sourceId)))
+        .get();
+
+    for (final occurrence in moving) {
+      // The target may already have this sentence — the same word twice under
+      // two spellings. Dropping the duplicate keeps the count honest.
+      final alreadyThere = await (_db.select(_db.glossaryOccurrences)
+            ..where((row) =>
+                row.glossaryEntryId.equals(targetId) &
+                row.utteranceId.equals(occurrence.utteranceId)))
+          .getSingleOrNull();
+
+      if (alreadyThere != null) {
+        await _tombstoneOccurrence(occurrence.id, now);
+        continue;
+      }
+      await (_db.update(_db.glossaryOccurrences)
+            ..where((row) => row.id.equals(occurrence.id)))
+          .write(
+        GlossaryOccurrencesCompanion(
+          glossaryEntryId: Value(targetId),
+          updatedAt: Value(now),
+          dirty: const Value(true),
+        ),
+      );
+    }
+    await _removeEntry(sourceId, now);
+  }
+
+  Future<void> _tombstoneOccurrence(String id, DateTime now) async {
+    await (_db.update(_db.glossaryOccurrences)
+          ..where((row) => row.id.equals(id)))
+        .write(
+      GlossaryOccurrencesCompanion(
+        deletedAt: Value(now),
+        updatedAt: Value(now),
+        dirty: const Value(true),
+      ),
+    );
+  }
+
+  Future<void> _removeEntry(String id, DateTime now) async {
+    await (_db.update(_db.glossaryEntries)..where((row) => row.id.equals(id)))
+        .write(
+      GlossaryEntriesCompanion(
+        deletedAt: Value(now),
+        updatedAt: Value(now),
+        dirty: const Value(true),
+      ),
+    );
   }
 
   /// The glossary list, filtered and sorted, as a live stream.

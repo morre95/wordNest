@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/utterance_repository.dart';
+import '../../core/enrichment/enrichment_service.dart';
 
 import '../../core/models/language.dart';
 import '../../core/permissions/microphone_permission.dart';
@@ -35,6 +36,7 @@ class SpeakController extends Notifier<SpeakState> {
   MicrophonePermissions get _permissions =>
       ref.read(microphonePermissionsProvider);
   UtteranceRepository get _utterances => ref.read(utteranceRepositoryProvider);
+  EnrichmentService get _enrichment => ref.read(enrichmentServiceProvider);
   LanguagePreferences get _preferences => ref.read(languagePreferencesProvider);
 
   @override
@@ -278,6 +280,10 @@ class SpeakController extends Notifier<SpeakState> {
       if (revision == _transcriptRevision) {
         state = state.copyWith(savedUtteranceId: saved.id);
       }
+      // Deliberately not awaited: the better translation and the word
+      // breakdown arrive when they arrive, and the user is already speaking
+      // again. A backend that is down leaves the row queued.
+      unawaited(_enrichment.enrichNow(saved));
     } on Object catch (error, stackTrace) {
       debugPrint('WordNest: could not save utterance: $error\n$stackTrace');
       if (revision == _transcriptRevision) {

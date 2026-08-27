@@ -4,6 +4,7 @@ import 'package:wordnest/core/db/database.dart';
 import 'package:wordnest/core/models/language.dart';
 import 'package:wordnest/core/providers.dart';
 
+import 'fake_backend_translator.dart';
 import 'fake_language_preferences.dart';
 import 'fake_microphone_permissions.dart';
 import 'fake_speech_recognizer.dart';
@@ -25,11 +26,16 @@ List<Override> speakOverrides({
   FakeMicrophonePermissions? permissions,
   FakeLanguagePreferences? preferences,
   WordNestDatabase? database,
+  FakeBackendTranslator? backendTranslator,
   LanguagePair pair = Languages.defaultPair,
 }) {
   return [
     initialLanguagePairProvider.overrideWithValue(pair),
     databaseProvider.overrideWithValue(database ?? _throwawayDatabase()),
+    // No speak test may reach the network: the real translator would try to
+    // contact a development backend that is not running.
+    backendTranslatorProvider
+        .overrideWithValue(backendTranslator ?? FakeBackendTranslator()),
     speechRecognizerProvider.overrideWithValue(recognizer),
     onDeviceTranslatorProvider.overrideWithValue(translator),
     microphonePermissionsProvider

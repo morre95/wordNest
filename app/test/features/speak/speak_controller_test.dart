@@ -5,12 +5,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wordnest/core/db/database.dart';
 import 'package:wordnest/core/db/tables.dart';
 import 'package:wordnest/core/models/language.dart';
+import 'package:wordnest/core/network/api_exception.dart';
+import 'package:wordnest/core/translation/remote_translation.dart';
 import 'package:wordnest/core/permissions/microphone_permission.dart';
 import 'package:wordnest/core/speech/speech_recognizer.dart';
 import 'package:wordnest/features/speak/speak_controller.dart';
 import 'package:wordnest/features/speak/speak_notice.dart';
 import 'package:wordnest/features/speak/speak_state.dart';
 
+import '../../fakes/fake_backend_translator.dart';
 import '../../fakes/fake_language_preferences.dart';
 import '../../fakes/fake_microphone_permissions.dart';
 import '../../fakes/fake_speech_recognizer.dart';
@@ -266,63 +269,100 @@ void main() {
   });
 
   group('persistence', () {
-    test('a finalised utterance is saved with its final translation', () async {
-      final database = WordNestDatabase.memory();
+    late WordNestDatabase database;
+    late FakeBackendTranslator backend;
+
+    ProviderContainer withDatabase() {
+      database = WordNestDatabase.memory();
       addTearDown(database.close);
-      final container = ProviderContainer.test(
+      return ProviderContainer.test(
         overrides: speakOverrides(
           recognizer: recognizer,
           translator: translator,
           permissions: permissions,
           preferences: preferences,
           database: database,
+          backendTranslator: backend,
         ),
       );
-      final controller = container.read(speakControllerProvider.notifier);
-      await controller.startListening();
+    }
+
+    setUp(() => backend = FakeBackendTranslator());
+
+    /// The utterance is written, then enriched, then written again — three
+    /// hops of the event loop before the row has settled.
+    Future<void> settleWrites() async {
+      for (var i = 0; i < 5; i++) {
+        await settle();
+      }
+    }
+
+    test('the sentence is saved with its on-device translation', () async {
+      backend.failure = const ApiException(ApiFailureKind.unreachable);
+      final container = withDatabase();
+      await container.read(speakControllerProvider.notifier).startListening();
 
       recognizer.emitFinal('the bakery is closed');
-      await settle();
-      await settle();
-      await settle();
+      await settleWrites();
 
-      final saved = await database.select(database.utterances).get();
-      expect(saved.single.sourceText, 'the bakery is closed');
-      expect(saved.single.translationText, '[es] the bakery is closed');
+      final saved = (await database.select(database.utterances).get()).single;
+      expect(saved.sourceText, 'the bakery is closed');
+      expect(saved.translationText, '[es] the bakery is closed');
+      expect(saved.enrichmentState, EnrichmentState.pending);
       expect(
         container.read(speakControllerProvider).savedUtteranceId,
-        saved.single.id,
+        saved.id,
       );
+    });
+
+    test("the backend's translation replaces the on-device one", () async {
+      backend.response = const RemoteTranslation(
+        sourceText: 'the bakery is closed',
+        sourceLanguage: 'en',
+        targetLanguage: 'es',
+        translation: 'la panadería está cerrada',
+      );
+      final container = withDatabase();
+      await container.read(speakControllerProvider.notifier).startListening();
+
+      recognizer.emitFinal('the bakery is closed');
+      await settleWrites();
+
+      final saved = (await database.select(database.utterances).get()).single;
+      expect(saved.translationText, 'la panadería está cerrada');
+      expect(saved.enrichmentState, EnrichmentState.enriched);
     });
 
     test('a sentence is kept even when it could not be translated', () async {
       translator.presentModels.remove('es');
-      final database = WordNestDatabase.memory();
-      addTearDown(database.close);
-      final container = ProviderContainer.test(
-        overrides: speakOverrides(
-          recognizer: recognizer,
-          translator: translator,
-          permissions: permissions,
-          preferences: preferences,
-          database: database,
-        ),
-      );
+      backend.failure = const ApiException(ApiFailureKind.unreachable);
+      final container = withDatabase();
       await container.read(speakControllerProvider.notifier).startListening();
 
       recognizer.emitFinal('the bakery is closed');
-      await settle();
-      await settle();
-      await settle();
+      await settleWrites();
 
-      final saved = await database.select(database.utterances).get();
-      expect(saved.single.sourceText, 'the bakery is closed');
-      expect(saved.single.translationText, '');
+      final saved = (await database.select(database.utterances).get()).single;
+      expect(saved.sourceText, 'the bakery is closed');
+      expect(saved.translationText, '');
       expect(
-        saved.single.enrichmentState,
+        saved.enrichmentState,
         EnrichmentState.pending,
         reason: 'the backend should still get a chance at it',
       );
+    });
+
+    test('a backend that is down never disturbs the speak screen', () async {
+      backend.failure = const ApiException(ApiFailureKind.serverError);
+      final container = withDatabase();
+      await container.read(speakControllerProvider.notifier).startListening();
+
+      recognizer.emitFinal('the bakery is closed');
+      await settleWrites();
+
+      final state = container.read(speakControllerProvider);
+      expect(state.notice, isNull);
+      expect(state.translationText, '[es] the bakery is closed');
     });
   });
 

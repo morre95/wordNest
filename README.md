@@ -18,8 +18,16 @@ the audio pipeline and watches the filesystem across a full recognition session.
 
 ```
 app/     Flutter client, package `wordnest`, application id com.wordnest.app
-api/     FastAPI service `wordnest-api`   (from milestone 3)
+api/     FastAPI service `wordnest-api`
 ```
+
+The app is local-first: SQLite via Drift is the source of truth on the device,
+and every screen reads from it. The backend exists for three things — keeping
+LLM API keys off the device, producing better translations with a word-level
+breakdown than an on-device model can, and (from milestone 4) being the
+authoritative store for cross-device sync. **The app stays fully usable with the
+backend down**: sentences are saved locally with an on-device translation and
+queued for enrichment, and the queue drains on resume or reconnect.
 
 ## Running the app
 
@@ -58,15 +66,77 @@ when a model for the current pair is missing.
 
 ## Running the backend
 
-The FastAPI service arrives in milestone 3. This section will cover `uv sync`,
-the environment variables that supply LLM API keys, and `docker compose up`.
+Requires [uv](https://docs.astral.sh/uv/). From `api/`:
+
+```bash
+cd api
+cp .env.example .env
+uv sync --extra dev
+uv run uvicorn wordnest_api.main:app --reload
+```
+
+The service comes up on `http://127.0.0.1:8000` with interactive docs at
+`/docs`. With the default `WORDNEST_TRANSLATION_PROVIDER=fake` it needs no API
+key and returns deterministic placeholder translations — enough to run the
+whole app end to end.
+
+For real translations, set both in `.env`:
+
+```bash
+WORDNEST_TRANSLATION_PROVIDER=anthropic
+WORDNEST_ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**API keys live only here.** They are read from the environment, never
+committed, and never shipped to a device — which is the main reason this
+service exists. `.env` is in `.gitignore`; `.env.example` documents every
+variable. The fake provider is refused outright when
+`WORDNEST_ENVIRONMENT=production`, so a misconfigured deployment fails at
+startup rather than silently serving nonsense.
+
+### In Docker
+
+```bash
+cd api
+docker compose up --build          # API on :8000, Postgres on :5432
+```
+
+### Checks
+
+```bash
+cd api
+uv run ruff check . && uv run ruff format --check .
+uv run pytest
+```
+
+The suite runs against the deterministic fake provider: no API key, no network.
+
+### Pointing the app at it
+
+The app reads its base URL at build time. `10.0.2.2` (the Android emulator's
+view of the host) is the default:
+
+```bash
+cd app
+flutter run --dart-define=WORDNEST_API_BASE_URL=http://192.168.1.10:8000
+```
+
+There is also a contract test that runs the app's real HTTP client against a
+running service. It is excluded from the normal test run because it needs one:
+
+```bash
+cd app
+flutter test integration_check --tags contract \
+  --dart-define=WORDNEST_API_BASE_URL=http://127.0.0.1:8000
+```
 
 ## Milestones
 
 1. **Vertical slice** — permission, live on-device recognition, on-device
    translation of partials, both on screen. *(done)*
-2. Persistence — Drift schema, saved utterances, glossary screen.
-3. Backend — FastAPI translation and word extraction, wired into the app.
+2. **Persistence** — Drift schema, saved utterances, glossary screen. *(done)*
+3. **Backend** — FastAPI translation and word extraction, containerised and
+   wired into the app. *(done)*
 4. Sync — device registration, delta sync, the merge module, account upgrade.
 5. Learning — spaced repetition, review mode, difficulty, text-to-speech.
 6. Hardening — offline behaviour, error and empty states, accessibility.

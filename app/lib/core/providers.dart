@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'db/database.dart';
+import 'enrichment/enrichment_service.dart';
+import 'network/api_client.dart';
 import 'db/glossary_repository.dart';
 import 'db/utterance_repository.dart';
 import 'models/language.dart';
@@ -8,6 +10,7 @@ import 'permissions/microphone_permission.dart';
 import 'settings/language_preferences.dart';
 import 'speech/platform_speech_recognizer.dart';
 import 'speech/speech_recognizer.dart';
+import 'translation/backend_translator.dart';
 import 'translation/mlkit_translator.dart';
 import 'translation/translator.dart';
 
@@ -59,3 +62,20 @@ final utteranceRepositoryProvider = Provider<UtteranceRepository>(
     glossaryRepository: ref.watch(glossaryRepositoryProvider),
   ),
 );
+
+final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
+
+final backendTranslatorProvider = Provider<BackendTranslator>(
+  (ref) => HttpBackendTranslator(ref.watch(apiClientProvider)),
+);
+
+/// Turns locally-saved utterances into enriched ones when the backend is up.
+final enrichmentServiceProvider = Provider<EnrichmentService>((ref) {
+  final service = EnrichmentService(
+    backendTranslator: ref.watch(backendTranslatorProvider),
+    utteranceRepository: ref.watch(utteranceRepositoryProvider),
+    glossaryRepository: ref.watch(glossaryRepositoryProvider),
+  );
+  ref.onDispose(service.dispose);
+  return service;
+});

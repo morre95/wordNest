@@ -101,3 +101,55 @@ and fixable, under-collecting is not.
 **The utterance is saved even when translation fails.** The row is written with
 an empty translation and left `pending`, so the sentence survives and the
 backend can fill it in later.
+
+## Milestone 3 — the backend
+
+**No database in the API yet.** Translation is stateless, so SQLAlchemy,
+Alembic and the Postgres schema arrive with sync in milestone 4, where the
+first migration has something to create. `docker-compose.yml` already runs
+Postgres so the container topology does not change later. Trade-off: milestone
+4 is a bigger step; the alternative was an empty first migration.
+
+**`claude-opus-5` with structured outputs.** `messages.parse()` with a Pydantic
+model, so the word breakdown is schema-validated rather than parsed out of
+prose. Trade-off: Opus is the expensive tier for what is often one short
+sentence; it is also the one that gets lemmas and parts of speech right in
+languages with real morphology, and the model is one config line
+(`WORDNEST_TRANSLATION_MODEL`) away from being changed.
+
+**Prompts are Jinja2 templates in `prompts/`, rendered with `StrictUndefined`.**
+A change to what the model is asked shows up as a reviewable diff, and a missing
+variable fails at render time instead of producing a prompt with a hole in it.
+
+**The provider is a `Protocol` with a deterministic fake.** The whole test suite
+runs with no API key and no network, and `WORDNEST_TRANSLATION_PROVIDER=fake`
+runs the app end to end. The fake is refused when
+`WORDNEST_ENVIRONMENT=production`, so a misconfigured deployment fails at
+startup rather than serving nonsense.
+
+**Rate limiting is an in-process token bucket, not Redis.** The effective limit
+is `limit x workers`. Trade-off: not an exact quota; it exists to stop abuse,
+not to meter a paid plan, and it refills continuously so one burst does not lock
+a user out for a whole minute. Keyed by IP now, by device token from milestone 4
+— an IP is shared by everyone behind one NAT.
+
+**Enrichment is fire-and-forget, never awaited by the speak screen.** The
+utterance is saved locally with its on-device translation first; the backend's
+better translation replaces it when it arrives. A backend that is down leaves
+the row `pending` and shows the user nothing. Trade-off: the user briefly sees
+the rougher translation.
+
+**A rejected sentence is marked `failed`, a retryable one is left `pending`.**
+`4xx` means the server will never accept that row, so the queue stops carrying
+it; `429`, `503`, `5xx` and no-network stop the whole run rather than hammering
+a service that is already struggling.
+
+**Backend lemmas re-key glossary entries, and re-keying can merge two rows.**
+When "opens" is lemmatised to "open" and an "open" entry already exists, the
+occurrences move onto it and the duplicate is tombstoned. Trade-off: real work
+on the enrichment path; without it one word becomes two rows, which breaks the
+uniqueness the sync merge rules depend on.
+
+**Body logging is off by default and says so loudly when on.** User sentences in
+an access log are a data-retention problem nobody asked for. Turning it on logs
+a warning that it is on.
