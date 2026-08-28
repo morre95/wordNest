@@ -32,6 +32,8 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   Future<bool>? _initialisation;
   ListeningMode _mode = ListeningMode.single;
   String? _languageCode;
+  String? _localeId;
+  bool _onDevice = true;
 
   @override
   bool get isAvailable => _initialised && _speech.isAvailable;
@@ -83,40 +85,36 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     }
 
     final systemLocale = await _speech.systemLocale();
-    final localeId = resolveSpeechLocaleId(
+    final locale = resolveSpeechLocale(
       languageCode: languageCode,
       availableLocaleIds: await availableLocaleIds(),
       systemLocaleId: systemLocale?.localeId,
     );
-    if (localeId == null) {
-      throw SpeechFailure(
-        SpeechFailureKind.localeUnsupported,
-        detail: languageCode,
-      );
-    }
 
     _mode = mode;
     _languageCode = languageCode;
+    _localeId = locale.localeId;
 
-    // On-device recognition is preferred so audio never reaches a server. Some
-    // devices have no on-device model for the locale; there we fall back to the
-    // platform default and tell the user, rather than refusing to listen.
-    var startedOnDevice = true;
+    // On-device recognition is preferred so audio never reaches a server, but
+    // only for a locale the device actually has a model for: the offline
+    // recogniser does not degrade gracefully, it fails the whole session. A
+    // language it has never heard of goes straight to the networked recogniser.
+    _onDevice = locale.hasOnDeviceModel;
     try {
-      await _listen(localeId: localeId, onDevice: true);
-    } on Exception {
-      startedOnDevice = false;
-      await _listen(localeId: localeId, onDevice: false);
+      await _listen(localeId: locale.localeId, onDevice: _onDevice);
+    } on Exception catch (error) {
+      throw SpeechFailure(
+        SpeechFailureKind.recognitionFailed,
+        detail: '$error',
+      );
     }
-    _onDeviceRecognition = startedOnDevice;
-    _events.add(const SpeechLifecycleChanged(SpeechLifecycle.listening));
+    _announceListening();
   }
 
-  bool _onDeviceRecognition = true;
-
-  /// Whether the last session ran fully on-device. The speak screen surfaces
-  /// this so the privacy line stays honest.
-  bool get isOnDeviceRecognition => _onDeviceRecognition;
+  void _announceListening() {
+    _events.add(SpeechRouteChanged(isOnDevice: _onDevice));
+    _events.add(const SpeechLifecycleChanged(SpeechLifecycle.listening));
+  }
 
   Future<void> _listen({required String localeId, required bool onDevice}) {
     return _speech.listen(
@@ -180,7 +178,33 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   }
 
   void _onPlatformError(SpeechRecognitionError error) {
-    _events.add(SpeechFailed(_translateError(error)));
+    final failure = _translateError(error);
+    // The offline recogniser reports an unusable model asynchronously, once the
+    // session is already running, so this is the only place the fallback can
+    // live. A locale it cannot serve is not a locale the phone cannot hear —
+    // the networked recogniser still can — so move there instead of telling the
+    // user their device does not speak their language.
+    if (_onDevice && failure.kind == SpeechFailureKind.localeUnsupported) {
+      unawaited(_retryOffDevice());
+      return;
+    }
+    _events.add(SpeechFailed(failure));
+  }
+
+  /// Restarts the session on the networked recogniser. [_onDevice] is cleared
+  /// first so a second locale failure reaches the user instead of looping.
+  Future<void> _retryOffDevice() async {
+    _onDevice = false;
+    try {
+      await _listen(localeId: _localeId!, onDevice: false);
+    } on Exception catch (error) {
+      _events.add(SpeechFailed(SpeechFailure(
+        SpeechFailureKind.recognitionFailed,
+        detail: '$error',
+      )));
+      return;
+    }
+    _announceListening();
   }
 
   static SpeechFailure _translateError(SpeechRecognitionError error) {

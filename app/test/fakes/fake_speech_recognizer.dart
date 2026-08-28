@@ -83,4 +83,7 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
       _events.add(SpeechLifecycleChanged(lifecycle));
 
   void emitFailure(SpeechFailure failure) => _events.add(SpeechFailed(failure));
+
+  void emitRoute({required bool isOnDevice}) =>
+      _events.add(SpeechRouteChanged(isOnDevice: isOnDevice));
 }

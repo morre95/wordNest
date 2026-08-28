@@ -87,6 +87,14 @@ class SpeechFailed extends SpeechEvent {
   final SpeechFailure failure;
 }
 
+/// Which recogniser the running session ended up on. Emitted whenever a session
+/// starts and again if it moves, so the privacy line on screen describes where
+/// the user's voice is actually going rather than where we hoped it would go.
+class SpeechRouteChanged extends SpeechEvent {
+  const SpeechRouteChanged({required this.isOnDevice});
+  final bool isOnDevice;
+}
+
 /// How long a session should run and how eagerly it should finalise.
 enum ListeningMode {
   /// Hold-to-talk: one utterance, finalised when the user lets go.
@@ -111,7 +119,11 @@ abstract interface class SpeechRecognizer {
   /// Whether a session is currently running.
   bool get isListening;
 
-  /// Platform locale identifiers this device can recognise, e.g. `en_US`.
+  /// Platform locale identifiers this device lists, e.g. `en_US`.
+  ///
+  /// On Android this is the *on-device* recogniser's list; the networked one
+  /// handles languages that never appear here. Treat a miss as "no offline
+  /// model", not as "cannot be recognised" — see [resolveSpeechLocale].
   Future<List<String>> availableLocaleIds();
 
   /// A single broadcast stream of text-only events.
@@ -134,12 +146,24 @@ abstract interface class SpeechRecognizer {
   Future<void> dispose();
 }
 
+/// The locale to ask the platform recogniser for, and whether the device has
+/// an offline model for it.
+typedef SpeechLocale = ({String localeId, bool hasOnDeviceModel});
+
 /// Chooses the platform speech locale to use for a BCP-47 language tag.
 ///
+/// [availableLocaleIds] is what the device reports, which on Android covers the
+/// *on-device* recogniser only — its networked recogniser understands far more
+/// languages than it will list. So a language missing from the list is not a
+/// language this phone cannot hear, and we never refuse on that basis: an
+/// unlisted language falls back to the bare tag with [hasOnDeviceModel] false,
+/// which tells the caller to skip the offline recogniser rather than the
+/// session.
+///
 /// Pure so it can be tested against the awkward cases: a device that only has
-/// `en_GB` when we asked for English, a device that has nothing for the
+/// `en_GB` when we asked for English, a device that lists nothing for the
 /// language at all, and a device that reports locales with a `-` separator.
-String? resolveSpeechLocaleId({
+SpeechLocale resolveSpeechLocale({
   required String languageCode,
   required List<String> availableLocaleIds,
   String? systemLocaleId,
@@ -151,12 +175,14 @@ String? resolveSpeechLocaleId({
   final matches = availableLocaleIds
       .where((id) => languageOf(id) == wanted)
       .toList(growable: false);
-  if (matches.isEmpty) return null;
+  if (matches.isEmpty) {
+    return (localeId: wanted, hasOnDeviceModel: false);
+  }
 
   // Prefer the system locale when it is one of the matches, so a British user
   // asking for English gets en_GB rather than whatever sorts first.
   if (systemLocaleId != null && matches.contains(systemLocaleId)) {
-    return systemLocaleId;
+    return (localeId: systemLocaleId, hasOnDeviceModel: true);
   }
   // Then prefer the "plain" tag (`en`) or the one whose region echoes the
   // language (`sv_SE`, `de_DE`), which is the conventional default.
@@ -164,9 +190,9 @@ String? resolveSpeechLocaleId({
   for (final candidate in [wanted, conventional]) {
     for (final id in matches) {
       if (id.replaceAll('-', '_').toLowerCase() == candidate.toLowerCase()) {
-        return id;
+        return (localeId: id, hasOnDeviceModel: true);
       }
     }
   }
-  return matches.first;
+  return (localeId: matches.first, hasOnDeviceModel: true);
 }

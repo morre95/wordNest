@@ -66,6 +66,19 @@ void main() {
     );
   });
 
+  testWidgets('says so when the phone recognises online instead of on-device',
+      (tester) async {
+    await pumpSpeakScreen(tester);
+
+    recognizer.emitRoute(isOnDevice: false);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Recognised by your phone online. Nothing is recorded.'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('holding the microphone starts a session and releasing ends it',
       (tester) async {
     await pumpSpeakScreen(tester);

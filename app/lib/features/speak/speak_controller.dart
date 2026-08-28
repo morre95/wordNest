@@ -197,6 +197,9 @@ class SpeakController extends Notifier<SpeakState> {
       case SpeechLifecycleChanged(:final lifecycle):
         _applyLifecycle(lifecycle);
 
+      case SpeechRouteChanged(:final isOnDevice):
+        state = state.copyWith(isRecognitionOnDevice: isOnDevice);
+
       case SpeechFailed(:final failure):
         state = state.copyWith(
           status: failure.isPermanent ? SpeakStatus.idle : state.status,
