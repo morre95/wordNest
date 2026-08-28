@@ -120,5 +120,5 @@ async def _client_events(websocket: WebSocket) -> AsyncIterator[object]:
 
 async def _close_quietly(websocket: WebSocket) -> None:
     """Closing an already-closed socket is not an error worth reporting."""
-    with suppress(RuntimeError):
+    with suppress(RuntimeError, WebSocketDisconnect):
         await websocket.close()

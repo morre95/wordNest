@@ -20,6 +20,7 @@ from httpx import ASGITransport, AsyncClient
 from wordnest_api.core.config import (
     Environment,
     Settings,
+    SpeechProviderName,
     TranslationProviderName,
 )
 from wordnest_api.main import create_app
@@ -47,6 +48,7 @@ def settings(database_url: str) -> Settings:
     return Settings(
         environment=Environment.test,
         translation_provider=TranslationProviderName.fake,
+        speech_provider=SpeechProviderName.fake,
         translation_rate_limit_per_minute=60,
         log_request_bodies=False,
         database_url=database_url,

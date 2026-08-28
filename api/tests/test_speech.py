@@ -5,6 +5,7 @@ needs no Deepgram key and never reaches the network.
 """
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +20,7 @@ from wordnest_api.features.speech.protocol import (
     partial_frame,
     read_control,
 )
+from wordnest_api.features.speech.router import _close_quietly
 
 #: 16-bit samples at 16 kHz. A tenth of a second of silence per frame is enough
 #: for the fake to count, and small enough that a test sends several.
@@ -90,6 +92,14 @@ class TestProtocolFrames:
 
 
 class TestSpeechSocket:
+    async def test_an_already_disconnected_socket_closes_quietly(self) -> None:
+        websocket = AsyncMock()
+        websocket.close.side_effect = WebSocketDisconnect(code=1006)
+
+        await _close_quietly(websocket)
+
+        websocket.close.assert_awaited_once_with()
+
     async def test_audio_in_produces_a_final_out(
         self, speech_app: TestClient, client: AsyncClient
     ) -> None:
