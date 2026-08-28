@@ -8,12 +8,13 @@ remembers to.
 """
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from wordnest_api.core.config import (
@@ -64,6 +65,18 @@ async def client(settings: Settings) -> AsyncIterator[AsyncClient]:
         app.router.lifespan_context(app),
     ):
         yield http_client
+
+
+@pytest.fixture
+def speech_app(settings: Settings) -> Iterator[TestClient]:
+    """A synchronous client, because WebSockets need one.
+
+    `httpx` + `ASGITransport` cannot speak WebSocket, so the speech socket is
+    the one part of the API that has to be exercised through Starlette's own
+    test client. Its context manager runs the lifespan, as `client` does.
+    """
+    with TestClient(create_app(settings)) as test_client:
+        yield test_client
 
 
 @pytest.fixture

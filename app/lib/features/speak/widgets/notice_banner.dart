@@ -10,13 +10,22 @@ class NoticeBanner extends StatelessWidget {
     required this.notice,
     required this.onDownloadModel,
     required this.onOpenSettings,
+    required this.onOpenAppSettings,
     required this.onDismiss,
     super.key,
   });
 
   final SpeakNotice notice;
   final void Function(Language language) onDownloadModel;
+
+  /// Opens the *system* settings page, where a permanent denial can be undone.
   final VoidCallback onOpenSettings;
+
+  /// Opens WordNest's own settings, where the recogniser is chosen. A
+  /// different destination from [onOpenSettings], deliberately not the same
+  /// callback.
+  final VoidCallback onOpenAppSettings;
+
   final VoidCallback onDismiss;
 
   @override
@@ -95,6 +104,13 @@ class NoticeBanner extends StatelessWidget {
             ),
           ),
         NothingHeard() => ("I didn't catch that — try again.", null),
+        SpeechServiceUnreachable() => (
+            'Deepgram could not be reached, so your phone listened instead.',
+            TextButton(
+              onPressed: onOpenAppSettings,
+              child: const Text('Settings'),
+            ),
+          ),
         RecognitionFailed() => ('Speech recognition stopped unexpectedly.', null),
         TranslationFailed() => ('That could not be translated just now.', null),
         CouldNotSave() => ('That sentence could not be saved to your glossary.', null),

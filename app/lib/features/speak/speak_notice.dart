@@ -89,6 +89,17 @@ class NothingHeard extends SpeakNotice {
   int get hashCode => (NothingHeard).hashCode;
 }
 
+/// The chosen recogniser's service could not be reached, so the phone's own
+/// recogniser took the session instead.
+class SpeechServiceUnreachable extends SpeakNotice {
+  const SpeechServiceUnreachable();
+
+  @override
+  bool operator ==(Object other) => other is SpeechServiceUnreachable;
+  @override
+  int get hashCode => (SpeechServiceUnreachable).hashCode;
+}
+
 /// Recognition failed for a reason we cannot name usefully.
 class RecognitionFailed extends SpeakNotice {
   const RecognitionFailed({this.detail});

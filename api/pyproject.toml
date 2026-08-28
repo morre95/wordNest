@@ -17,6 +17,9 @@ dependencies = [
     "aiosqlite>=0.22.0",
     "pyjwt>=2.11.0",
     "email-validator>=2.3.0",
+    # The Deepgram client. Present transitively via uvicorn[standard], which is
+    # not a contract to rely on for something the speech relay imports directly.
+    "websockets>=15.0",
 ]
 
 [project.optional-dependencies]

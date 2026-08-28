@@ -28,6 +28,16 @@ class TranslationProviderName(StrEnum):
     fake = "fake"
 
 
+class SpeechProviderName(StrEnum):
+    """Which implementation backs the speech relay."""
+
+    deepgram = "deepgram"
+
+    #: A deterministic stand-in used by the test suite and by local development
+    #: without an API key. Never selectable in production.
+    fake = "fake"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="WORDNEST_",
@@ -71,6 +81,22 @@ class Settings(BaseSettings):
     #: ANTHROPIC_API_KEY when this is unset.
     anthropic_api_key: str | None = None
     translation_model: str = "claude-opus-5"
+
+    speech_provider: SpeechProviderName = SpeechProviderName.fake
+
+    #: Supplied as WORDNEST_DEEPGRAM_API_KEY. Required when the speech provider
+    #: is `deepgram`, and the reason audio comes through this service at all
+    #: rather than going straight from the phone.
+    deepgram_api_key: str | None = None
+    deepgram_model: str = "nova-3"
+
+    #: A hard ceiling on one speech session. Transcription is billed by the
+    #: minute of audio, so a client that stops sending without closing must not
+    #: be able to hold a paid upstream session open indefinitely.
+    speech_session_seconds: int = 300
+
+    #: Sessions one client may open per minute. Checked once, at connect.
+    speech_rate_limit_per_minute: int = 20
 
     #: Per-client ceiling on the translation endpoint. Chosen to be generous for
     #: a person speaking and impossible for a script to abuse cheaply.

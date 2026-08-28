@@ -21,6 +21,10 @@ import '../../fakes/fake_translator.dart';
 import '../../fakes/speak_harness.dart';
 
 void main() {
+  // The controller listens for the app being backgrounded, so it needs a
+  // binding even though nothing here pumps a widget.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late FakeSpeechRecognizer recognizer;
   late FakeTranslator translator;
   late FakeMicrophonePermissions permissions;

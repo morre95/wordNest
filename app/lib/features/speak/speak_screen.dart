@@ -77,6 +77,7 @@ class SpeakScreen extends ConsumerWidget {
                   notice: state.notice!,
                   onDownloadModel: controller.downloadMissingModel,
                   onOpenSettings: controller.openSystemSettings,
+                  onOpenAppSettings: () => context.push(Routes.settings),
                   onDismiss: controller.dismissNotice,
                 ),
               ],
@@ -108,7 +109,7 @@ class SpeakScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               _PrivacyLine(
-                isOnDevice: state.isRecognitionOnDevice,
+                route: state.recognitionRoute,
                 onTap: () => context.push(Routes.privacy),
               ),
               const SizedBox(height: 12),
@@ -192,17 +193,33 @@ class _HandsFreeToggle extends StatelessWidget {
 /// The privacy guarantee, in plain language, on the screen where it matters —
 /// and the way into the full explanation.
 class _PrivacyLine extends StatelessWidget {
-  const _PrivacyLine({required this.isOnDevice, required this.onTap});
+  const _PrivacyLine({required this.route, required this.onTap});
 
-  final bool isOnDevice;
+  final SpeechRoute route;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final text = isOnDevice
-        ? 'Your voice stays on this device. Nothing is recorded.'
-        : 'Recognised by your phone online. Nothing is recorded.';
+    // "Nothing is kept" rather than "nothing is recorded" on the last one: the
+    // audio is genuinely handled by two servers on its way through, and a
+    // claim about what survives is one the code can hold up where a claim
+    // about recording would be splitting hairs.
+    final (text, icon) = switch (route) {
+      SpeechRoute.onDevice => (
+          'Your voice stays on this device. Nothing is recorded.',
+          Icons.lock_outline,
+        ),
+      SpeechRoute.phoneOnline => (
+          'Recognised by your phone online. Nothing is recorded.',
+          Icons.cloud_outlined,
+        ),
+      SpeechRoute.wordnestServer => (
+          "Your voice goes to WordNest's server, then to Deepgram. "
+              'Nothing is kept.',
+          Icons.cloud_upload_outlined,
+        ),
+    };
 
     return Semantics(
       button: true,
@@ -217,7 +234,7 @@ class _PrivacyLine extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  isOnDevice ? Icons.lock_outline : Icons.cloud_outlined,
+                  icon,
                   size: 14,
                   color: theme.colorScheme.onSurfaceVariant,
                 ),

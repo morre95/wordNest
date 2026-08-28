@@ -7,13 +7,15 @@ Everything a route needs is injected, so a test can replace any of it with
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..features.auth.email_sender import EmailSender
 from ..features.auth.service import AuthService
 from ..features.auth.tokens import AccessTokenClaims, read_access_token
+from ..features.speech.provider import SpeechProvider
+from ..features.speech.service import SpeechRelayService
 from ..features.sync.service import SyncService
 from ..features.translation.provider import TranslationProvider
 from ..features.translation.service import TranslationService
@@ -130,3 +132,63 @@ def current_session(
 
 
 CurrentSessionDep = Annotated[AccessTokenClaims, Depends(current_session)]
+
+
+def get_socket_settings(websocket: WebSocket) -> Settings:
+    """`get_app_settings` reads a `Request`, which a WebSocket route has none
+    of. Same value, taken off the same app."""
+    return websocket.app.state.settings
+
+
+SocketSettingsDep = Annotated[Settings, Depends(get_socket_settings)]
+
+
+def current_session_ws(
+    websocket: WebSocket,
+    settings: Settings,
+) -> AccessTokenClaims:
+    """The account and device on the other end of a speech socket.
+
+    `current_session` cannot be reused: it depends on `HTTPBearer`, which takes
+    a `Request`, and a WebSocket is an `HTTPConnection` but not a `Request`. The
+    token verification itself is shared — this reads the header and hands it to
+    the same `read_access_token`.
+    """
+    from ..features.auth.tokens import InvalidCredentialsError
+
+    header = websocket.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise InvalidCredentialsError("This socket needs an access token.")
+    return read_access_token(token, secret=settings.jwt_secret)
+
+
+def get_speech_provider(websocket: WebSocket) -> SpeechProvider:
+    """Built once at startup, like the translation provider and for the same
+    reason: it owns a connection pool."""
+    return websocket.app.state.speech_provider
+
+
+def get_speech_relay(
+    provider: Annotated[SpeechProvider, Depends(get_speech_provider)],
+) -> SpeechRelayService:
+    return SpeechRelayService(provider)
+
+
+def get_speech_rate_limiter(websocket: WebSocket) -> TokenBucketRateLimiter:
+    return websocket.app.state.speech_rate_limiter
+
+
+def socket_client_key(websocket: WebSocket) -> str:
+    """Identifies the caller for rate limiting, as `client_key` does for HTTP."""
+    forwarded = websocket.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return websocket.client.host if websocket.client else "unknown"
+
+
+SpeechRelayDep = Annotated[SpeechRelayService, Depends(get_speech_relay)]
+SpeechRateLimiterDep = Annotated[
+    TokenBucketRateLimiter, Depends(get_speech_rate_limiter)
+]
+SocketClientKeyDep = Annotated[str, Depends(socket_client_key)]

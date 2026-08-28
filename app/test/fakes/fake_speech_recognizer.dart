@@ -25,6 +25,11 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
   final startedModes = <ListeningMode>[];
   int stopCount = 0;
   int cancelCount = 0;
+
+  /// Whether [dispose] has run. An engine swap that leaks the old recogniser
+  /// leaks a microphone with it, so a test needs to be able to see this.
+  bool disposed = false;
+
   bool _listening = false;
 
   @override
@@ -66,7 +71,10 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
   }
 
   @override
-  Future<void> dispose() async => _events.close();
+  Future<void> dispose() async {
+    disposed = true;
+    await _events.close();
+  }
 
   // --- Test drivers -------------------------------------------------------
 
@@ -84,6 +92,5 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
 
   void emitFailure(SpeechFailure failure) => _events.add(SpeechFailed(failure));
 
-  void emitRoute({required bool isOnDevice}) =>
-      _events.add(SpeechRouteChanged(isOnDevice: isOnDevice));
+  void emitRoute(SpeechRoute route) => _events.add(SpeechRouteChanged(route));
 }

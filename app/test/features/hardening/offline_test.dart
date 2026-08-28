@@ -193,6 +193,16 @@ void main() {
     testWidgets('the privacy explanation is reachable offline', (tester) async {
       await pump(tester, const SettingsScreen());
 
+      // Scrolled to rather than expected on the first screen: the settings
+      // list is longer than a phone and "reachable" is the claim being made,
+      // not "visible without moving". `scrollUntilVisible` fails the test if
+      // the tile is not there at all, which is the thing worth guarding.
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('settings.privacy')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+
       expect(find.byKey(const Key('settings.privacy')), findsOneWidget);
     });
   });

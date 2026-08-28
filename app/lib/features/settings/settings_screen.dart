@@ -7,9 +7,11 @@ import '../../core/providers.dart';
 import '../../core/router.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/speech/speech_engine.dart';
 import '../glossary/widgets/empty_state.dart';
 import 'settings_controller.dart';
 import 'widgets/pairing_dialogs.dart';
+import 'widgets/speech_engine_sheet.dart';
 import 'widgets/sync_status_tile.dart';
 
 /// Sync status, the devices on this account, and the two ways to add another.
@@ -21,6 +23,7 @@ class SettingsScreen extends ConsumerWidget {
     final session = ref.watch(sessionProvider).value;
     final status = ref.watch(syncStatusProvider).value;
     final state = ref.watch(syncStateProvider).value;
+    final engine = ref.watch(speechEngineProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -91,14 +94,28 @@ class SettingsScreen extends ConsumerWidget {
           ],
           const _SectionHeader('Devices'),
           _DeviceList(),
+          const _SectionHeader('Speech'),
+          const _SpeechEngineTile(),
           const _SectionHeader('Privacy'),
           ListTile(
             key: const Key('settings.privacy'),
             leading: const Icon(Icons.mic_none_outlined),
-            title: const Text('Your voice is never recorded'),
-            subtitle: const Text(
-              'Speech is turned into text on this device. No audio is saved to '
-              'disk, uploaded, or kept after the words are recognised.',
+            title: Text(
+              engine == SpeechEngine.phone
+                  ? 'Your voice is never recorded'
+                  : 'Where your voice goes',
+            ),
+            // The claim has to follow the setting: "turned into text on this
+            // device" stops being true the moment Deepgram is chosen, and a
+            // privacy line that is only sometimes true is worse than none.
+            subtitle: Text(
+              engine == SpeechEngine.phone
+                  ? 'Speech is turned into text on this device. No audio is '
+                      'saved to disk, uploaded, or kept after the words are '
+                      'recognised.'
+                  : 'Speech goes to WordNest and on to Deepgram to be turned '
+                      'into text. No audio is saved to disk or kept after the '
+                      'words are recognised.',
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push(Routes.privacy),
@@ -266,6 +283,48 @@ class _DeviceList extends ConsumerWidget {
 
     await ref.read(sessionManagerProvider).revokeDevice(device.id);
     ref.invalidate(devicesProvider);
+  }
+}
+
+/// The recogniser choice, and the one place the user is asked before their
+/// voice starts leaving the device.
+class _SpeechEngineTile extends ConsumerWidget {
+  const _SpeechEngineTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final engine = ref.watch(speechEngineProvider);
+
+    return ListTile(
+      key: const Key('settings.speechEngine'),
+      leading: const Icon(Icons.graphic_eq_outlined),
+      title: const Text('Speech recognition'),
+      subtitle: Text('${engine.label} — ${engine.description}'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _choose(context, ref, current: engine),
+    );
+  }
+
+  Future<void> _choose(
+    BuildContext context,
+    WidgetRef ref, {
+    required SpeechEngine current,
+  }) async {
+    final chosen = await showSpeechEnginePicker(context, selected: current);
+    if (chosen == null || chosen == current) return;
+    if (!context.mounted) return;
+
+    final preferences = ref.read(speechEnginePreferencesProvider);
+    // Only the engines that send audio off the device need agreement, and only
+    // the first time. Switching back to the phone never asks anything.
+    if (chosen != SpeechEngine.phone &&
+        !await preferences.hasAgreedToLeaveDevice()) {
+      if (!context.mounted) return;
+      if (!await confirmVoiceLeavesDevice(context)) return;
+      await preferences.recordAgreementToLeaveDevice();
+    }
+
+    await ref.read(speechEngineProvider.notifier).choose(chosen);
   }
 }
 

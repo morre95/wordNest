@@ -63,6 +63,24 @@ class TranslationUnavailableError(WordNestError):
     code = "TRANSLATION_UNAVAILABLE"
 
 
+class SpeechUnavailableError(WordNestError):
+    """The transcription service could not be reached or refused the session.
+
+    The app falls back to the phone's own recogniser, so this is a degraded
+    service rather than a broken one.
+    """
+
+    status_code = HTTPStatus.SERVICE_UNAVAILABLE
+    code = "SPEECH_UNAVAILABLE"
+
+
+class UnsupportedSpeechLanguageError(WordNestError):
+    """The transcription service does not handle the language asked for."""
+
+    status_code = HTTPStatus.UNPROCESSABLE_ENTITY
+    code = "SPEECH_LANGUAGE_UNSUPPORTED"
+
+
 def _envelope(
     status_code: int,
     code: str,

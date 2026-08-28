@@ -21,35 +21,48 @@ class PrivacyScreen extends StatelessWidget {
           _Promise(
             icon: Icons.mic_off_outlined,
             title: 'Your voice is never recorded',
-            body: 'When you speak, your phone turns the sound into text as it '
-                'happens. WordNest never receives the sound itself. Nothing is '
-                'written to a file, nothing is uploaded, and nothing is kept '
-                'once the words have been recognised — not even briefly, and '
-                'not even to help us improve anything.',
+            body: 'Nothing you say is written to a file — not on your phone, '
+                'not on our server, not briefly, and not to help us improve '
+                'anything. Audio is turned into text and is gone. This is the '
+                'one promise that holds however WordNest is set up, and it is '
+                'the one checked automatically on every build.',
           ),
           _Promise(
             icon: Icons.phone_iphone,
-            title: 'Recognition happens on this device',
+            title: 'Recognition happens on this device by default',
             body: 'WordNest asks your phone for on-device speech recognition '
                 'first. Some languages have no on-device model; for those, your '
                 'phone uses its own online recogniser, and the speak screen '
-                'says so at the time. Either way WordNest never handles audio.',
+                'says so at the time. On this setting WordNest never handles '
+                'the sound itself at all.',
+          ),
+          _Promise(
+            icon: Icons.cloud_upload_outlined,
+            title: 'Choosing Deepgram sends your voice to us',
+            body: 'Settings lets you swap the phone for Deepgram, which is more '
+                'accurate. It is the one setting that changes where your voice '
+                'goes: WordNest sends the sound to its own server, which passes '
+                'it straight to Deepgram and passes the text back. We ask before '
+                'turning it on, the speak screen says so while it is on, and '
+                'nothing is written down anywhere along the way. Switch back to '
+                'your phone whenever you like.',
           ),
           _Promise(
             icon: Icons.text_fields,
-            title: 'Only text is stored or sent',
+            title: 'Only text is stored',
             body: 'What you said, its translation, and the words we pull out of '
-                'it. That is the whole of it. It is saved on this device first, '
-                'and it works with no connection at all.',
+                'it. That is the whole of what is kept. It is saved on this '
+                'device first, and on the default setting it works with no '
+                'connection at all.',
           ),
           _Promise(
             icon: Icons.cloud_outlined,
             title: 'What the server is for',
-            body: 'Three things: better translations than a phone-sized model '
-                'can manage, breaking a sentence into words worth learning, and '
-                'keeping your glossary in step across your devices. It sees '
-                'sentences you have finished saying. It does not write them to '
-                'its logs.',
+            body: 'Better translations than a phone-sized model can manage, '
+                'breaking a sentence into words worth learning, keeping your '
+                'glossary in step across your devices, and — only if you choose '
+                'Deepgram — passing your voice through to be transcribed. It '
+                'does not write any of it to its logs.',
           ),
           _Promise(
             icon: Icons.person_outline,
@@ -68,10 +81,12 @@ class PrivacyScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'The promise about audio is checked automatically. A test reads the '
-            'code that touches the microphone and fails the build if it can '
-            'reach a file or the network, and another watches the filesystem '
-            'across a whole recognition session.',
+            'The promise about audio is checked automatically. A test reads '
+            'the code that touches the microphone and fails the build if it '
+            'can reach a file, names the only two files allowed to handle '
+            'sound at all, and refuses any way of holding on to it. Another '
+            'watches the filesystem across a whole recognition session, on '
+            'both settings.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

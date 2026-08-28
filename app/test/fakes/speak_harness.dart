@@ -4,10 +4,15 @@ import 'package:wordnest/core/db/database.dart';
 import 'package:wordnest/core/models/language.dart';
 import 'package:wordnest/core/providers.dart';
 
+import 'package:wordnest/core/speech/speech_engine.dart';
+
+import 'fake_microphone_stream.dart';
+import 'fake_speech_socket.dart';
 import 'fake_backend_translator.dart';
 import 'fake_language_preferences.dart';
 import 'fake_microphone_permissions.dart';
 import 'fake_speaker.dart';
+import 'fake_speech_engine_preferences.dart';
 import 'fake_speech_recognizer.dart';
 import 'fake_translator.dart';
 
@@ -22,7 +27,9 @@ WordNestDatabase _throwawayDatabase() {
 /// The provider overrides every speak test needs, in one place, so a test only
 /// spells out the fake whose behaviour it is actually varying.
 List<Override> speakOverrides({
-  required FakeSpeechRecognizer recognizer,
+  /// Omit to let the real factory build a recogniser from [engine] — which is
+  /// how the engine switch and the cloud path are exercised.
+  FakeSpeechRecognizer? recognizer,
   required FakeTranslator translator,
   FakeMicrophonePermissions? permissions,
   FakeLanguagePreferences? preferences,
@@ -30,6 +37,10 @@ List<Override> speakOverrides({
   FakeBackendTranslator? backendTranslator,
   FakeSpeaker? speaker,
   LanguagePair pair = Languages.defaultPair,
+  SpeechEngine engine = SpeechEngine.phone,
+  FakeSpeechEnginePreferences? enginePreferences,
+  FakeMicrophoneStream? microphone,
+  FakeSpeechSocketFactory? sockets,
 }) {
   return [
     initialLanguagePairProvider.overrideWithValue(pair),
@@ -39,11 +50,23 @@ List<Override> speakOverrides({
     backendTranslatorProvider
         .overrideWithValue(backendTranslator ?? FakeBackendTranslator()),
     speakerProvider.overrideWithValue(speaker ?? FakeSpeaker()),
-    speechRecognizerProvider.overrideWithValue(recognizer),
+    if (recognizer != null)
+      speechRecognizerProvider.overrideWithValue(recognizer),
+    if (microphone != null)
+      microphoneStreamProvider.overrideWithValue(microphone),
+    if (sockets != null) ...[
+      speechSocketFactoryProvider.overrideWithValue(sockets.connect),
+      speechCredentialsProvider
+          .overrideWithValue(({bool renew = false}) async => 'a-token'),
+    ],
     onDeviceTranslatorProvider.overrideWithValue(translator),
     microphonePermissionsProvider
         .overrideWithValue(permissions ?? FakeMicrophonePermissions()),
     languagePreferencesProvider
         .overrideWithValue(preferences ?? FakeLanguagePreferences()),
+    initialSpeechEngineProvider.overrideWithValue(engine),
+    speechEnginePreferencesProvider.overrideWithValue(
+      enginePreferences ?? FakeSpeechEnginePreferences(stored: engine),
+    ),
   ];
 }

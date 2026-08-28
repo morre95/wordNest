@@ -2,13 +2,25 @@
 ///
 /// AUDIO POLICY — read before changing anything in this directory.
 ///
-/// Microphone audio is owned end-to-end by the platform speech recogniser.
-/// This app never receives audio samples, never opens a file, and never sends
-/// bytes anywhere. Everything that crosses this interface is [String] text.
-/// There is deliberately no `File`, no `path_provider`, and no `dart:io` import
-/// anywhere under `lib/core/speech/`; `test/core/speech/no_audio_persistence_test.dart`
-/// asserts that mechanically, and that a recognition session writes nothing to
-/// the application document or cache directories.
+/// Everything that crosses *this interface* is [String] text. Audio never gets
+/// this far up.
+///
+/// On the default setting, microphone audio is owned end-to-end by the platform
+/// recogniser and this app never receives a sample. Choosing Deepgram in
+/// settings changes that: WordNest captures PCM frames and streams them to its
+/// own server, which relays them on. That is a real weakening of what this
+/// directory used to promise, and it is confined as narrowly as it can be —
+/// exactly two files may touch a frame, one to read it from the microphone and
+/// one to put it on a socket, and each forwards it and forgets it.
+///
+/// What did not change: no file, ever. There is deliberately no `File`, no
+/// `path_provider` and no `dart:io` import anywhere under `lib/core/speech/`,
+/// no buffer that could accumulate a recording, and no path by which the two
+/// audio-carrying files could reach storage.
+/// `test/core/speech/no_audio_persistence_test.dart` asserts all of that
+/// mechanically — including which files are allowed the exception — and that a
+/// recognition session on either engine writes nothing to the application
+/// document or cache directories.
 library;
 
 import 'dart:async';
@@ -29,6 +41,10 @@ enum SpeechFailureKind {
 
   /// The recogniser heard nothing before it timed out.
   noSpeechDetected,
+
+  /// The transcription service could not be reached. Not the phone's fault,
+  /// and the phone's own recogniser can still be asked instead.
+  serviceUnreachable,
 
   /// Anything the platform reported that we cannot act on specifically.
   recognitionFailed,
@@ -87,12 +103,31 @@ class SpeechFailed extends SpeechEvent {
   final SpeechFailure failure;
 }
 
+/// Where the audio for the running session actually goes.
+///
+/// A closed set rather than a flag, so the privacy line is a total function of
+/// the route and a new engine cannot ship while the screen still describes the
+/// old one.
+enum SpeechRoute {
+  /// The phone's own offline recogniser. The audio does not leave the device.
+  onDevice,
+
+  /// The phone's own online recogniser — Google's or Apple's. The audio leaves
+  /// the device, but it goes to the phone's maker, not to WordNest.
+  phoneOnline,
+
+  /// WordNest's own server, which passes the audio straight on to a
+  /// transcription service and passes the text back. Only ever reached because
+  /// the user chose it in settings.
+  wordnestServer,
+}
+
 /// Which recogniser the running session ended up on. Emitted whenever a session
 /// starts and again if it moves, so the privacy line on screen describes where
 /// the user's voice is actually going rather than where we hoped it would go.
 class SpeechRouteChanged extends SpeechEvent {
-  const SpeechRouteChanged({required this.isOnDevice});
-  final bool isOnDevice;
+  const SpeechRouteChanged(this.route);
+  final SpeechRoute route;
 }
 
 /// How long a session should run and how eagerly it should finalise.

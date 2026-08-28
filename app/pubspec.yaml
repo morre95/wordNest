@@ -27,6 +27,12 @@ dependencies:
   path_provider: ^2.1.6
   shared_preferences: ^2.5.5
 
+  # Microphone capture and transport for cloud recognition. Only
+  # lib/core/speech/microphone_stream.dart and speech_socket.dart may import
+  # these; test/core/speech/no_audio_persistence_test.dart enforces that.
+  record: ^6.1.2
+  web_socket_channel: ^3.0.3
+
   # Platform + networking
   dio: ^5.11.0
   permission_handler: ^13.0.1
@@ -38,6 +44,9 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Only for tests: supplies the in-memory backing store that lets the
+  # preference decoders be exercised without a platform channel.
+  shared_preferences_platform_interface: ^2.4.2
   flutter_lints: ^6.0.0
   build_runner: ^2.16.0
   freezed: ^4.0.0

@@ -12,7 +12,9 @@ import 'speech_recognizer.dart';
 /// AUDIO POLICY: `speech_to_text` streams microphone audio inside the platform
 /// recogniser and hands us transcription callbacks. No audio buffer is exposed
 /// to Dart, so there is nothing here that could be written to disk even by
-/// accident — and nothing in this file opens a file or a socket.
+/// accident — and nothing in this file opens a file or a socket. This is the
+/// default engine, and the one on which WordNest still never handles audio at
+/// all.
 class PlatformSpeechRecognizer implements SpeechRecognizer {
   PlatformSpeechRecognizer({stt.SpeechToText? speech})
       : _speech = speech ?? stt.SpeechToText();
@@ -57,7 +59,7 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
       return worked;
     }).catchError((Object error) {
       _initialising = false;
-      _events.add(SpeechFailed(
+      _emit(SpeechFailed(
         SpeechFailure(SpeechFailureKind.unavailable, detail: '$error'),
       ));
       return false;
@@ -112,8 +114,21 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   }
 
   void _announceListening() {
-    _events.add(SpeechRouteChanged(isOnDevice: _onDevice));
-    _events.add(const SpeechLifecycleChanged(SpeechLifecycle.listening));
+    _emit(SpeechRouteChanged(
+      _onDevice ? SpeechRoute.onDevice : SpeechRoute.phoneOnline,
+    ));
+    _emit(const SpeechLifecycleChanged(SpeechLifecycle.listening));
+  }
+
+  /// Emits, unless this recogniser has been disposed.
+  ///
+  /// `speech_to_text` routes its callbacks through one platform channel, so a
+  /// recogniser replaced mid-flight — by the user changing engine, say — can
+  /// still be handed an error the platform had already queued. Emitting it
+  /// would add to a closed controller and take the app down.
+  void _emit(SpeechEvent event) {
+    if (_events.isClosed) return;
+    _events.add(event);
   }
 
   Future<void> _listen({required String localeId, required bool onDevice}) {
@@ -137,11 +152,11 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     final text = result.recognizedWords.trim();
     if (result.finalResult) {
       if (text.isEmpty) {
-        _events.add(const SpeechFailed(
+        _emit(const SpeechFailed(
           SpeechFailure(SpeechFailureKind.noSpeechDetected, isPermanent: false),
         ));
       } else {
-        _events.add(SpeechFinal(text, confidence: result.confidence));
+        _emit(SpeechFinal(text, confidence: result.confidence));
       }
       if (_mode == ListeningMode.continuous && _languageCode != null) {
         // Hands-free: the platform ends the session at each pause, so start the
@@ -149,7 +164,7 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
         unawaited(_restartContinuous());
       }
     } else if (text.isNotEmpty) {
-      _events.add(SpeechPartial(text));
+      _emit(SpeechPartial(text));
     }
   }
 
@@ -157,14 +172,14 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     try {
       await start(languageCode: _languageCode!, mode: ListeningMode.continuous);
     } on SpeechFailure catch (failure) {
-      _events.add(SpeechFailed(failure));
+      _emit(SpeechFailed(failure));
     }
   }
 
   void _onSoundLevel(double level) {
     // speech_to_text reports roughly -2..10 on Android and dB on iOS; clamp to
     // a 0..1 band the animation can use without knowing the platform.
-    _events.add(SpeechSoundLevel((level / 10).clamp(0.0, 1.0)));
+    _emit(SpeechSoundLevel((level / 10).clamp(0.0, 1.0)));
   }
 
   void _onPlatformStatus(String status) {
@@ -174,7 +189,7 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
       'done' => SpeechLifecycle.done,
       _ => null,
     };
-    if (lifecycle != null) _events.add(SpeechLifecycleChanged(lifecycle));
+    if (lifecycle != null) _emit(SpeechLifecycleChanged(lifecycle));
   }
 
   void _onPlatformError(SpeechRecognitionError error) {
@@ -188,7 +203,7 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
       unawaited(_retryOffDevice());
       return;
     }
-    _events.add(SpeechFailed(failure));
+    _emit(SpeechFailed(failure));
   }
 
   /// Restarts the session on the networked recogniser. [_onDevice] is cleared
@@ -198,7 +213,7 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     try {
       await _listen(localeId: _localeId!, onDevice: false);
     } on Exception catch (error) {
-      _events.add(SpeechFailed(SpeechFailure(
+      _emit(SpeechFailed(SpeechFailure(
         SpeechFailureKind.recognitionFailed,
         detail: '$error',
       )));
@@ -235,7 +250,7 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   Future<void> cancel() async {
     _mode = ListeningMode.single;
     await _speech.cancel();
-    _events.add(const SpeechLifecycleChanged(SpeechLifecycle.idle));
+    _emit(const SpeechLifecycleChanged(SpeechLifecycle.idle));
   }
 
   @override

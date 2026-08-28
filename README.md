@@ -6,13 +6,21 @@ produce in a glossary that remembers which ones you struggle with.
 WordNest opens straight onto the microphone. There is no onboarding, no
 sign-in, and nothing between a cold launch and speaking.
 
-**Your voice never leaves the recogniser.** Speech recognition runs on-device
-through the platform speech APIs. No recording is written to disk, no audio is
-uploaded, and no audio is cached. Only text — transcript, translation and the
-vocabulary derived from them — is stored or transmitted. The guarantee is
-enforced mechanically by
+**No recording is ever written, on any setting.** Nothing is saved to disk, and
+nothing is cached, anywhere in the app or the service. That is the promise that
+holds unconditionally, and it is enforced mechanically by
 `app/test/core/speech/no_audio_persistence_test.dart`, which reads the source of
-the audio pipeline and watches the filesystem across a full recognition session.
+the audio pipeline, names the only two files permitted to handle audio at all,
+refuses any construct that could accumulate it, and watches the filesystem
+across a full recognition session on both engines.
+
+**By default your voice never leaves the recogniser.** Speech recognition runs
+on-device through the platform speech APIs, and WordNest never receives a
+sample. Settings offers Deepgram as a more accurate alternative; it is the one
+setting that changes where the voice goes, because reaching Deepgram means
+streaming audio to WordNest's own service, which relays it and relays the text
+back. It is opt-in, it asks first, and the speak screen names the route it is
+actually using every time it listens.
 
 ## Layout
 
@@ -22,12 +30,15 @@ api/     FastAPI service `wordnest-api`
 ```
 
 The app is local-first: SQLite via Drift is the source of truth on the device,
-and every screen reads from it. The backend exists for three things — keeping
-LLM API keys off the device, producing better translations with a word-level
-breakdown than an on-device model can, and (from milestone 4) being the
-authoritative store for cross-device sync. **The app stays fully usable with the
-backend down**: sentences are saved locally with an on-device translation and
-queued for enrichment, and the queue drains on resume or reconnect.
+and every screen reads from it. The backend exists for four things — keeping
+third-party API keys off the device, producing better translations with a
+word-level breakdown than an on-device model can, being the authoritative store
+for cross-device sync, and relaying audio to Deepgram for anyone who has chosen
+it. **The app stays fully usable with the backend down**: sentences are saved
+locally with an on-device translation and queued for enrichment, the queue
+drains on resume or reconnect, and a speech session that cannot reach the relay
+falls back to the phone's own recogniser rather than leaving the microphone
+dead.
 
 ## Running the app
 

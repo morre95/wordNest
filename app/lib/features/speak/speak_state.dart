@@ -51,9 +51,9 @@ abstract class SpeakState with _$SpeakState {
     /// Smoothed input level, 0..1, for the listening animation only.
     @Default(0.0) double soundLevel,
 
-    /// True when the last session ran entirely on-device. False means the
-    /// platform fell back to network recognition and the user should know.
-    @Default(true) bool isRecognitionOnDevice,
+    /// Where the audio of the last session actually went. Drives the privacy
+    /// line, which must describe the route taken rather than the one intended.
+    @Default(SpeechRoute.onDevice) SpeechRoute recognitionRoute,
 
     /// The row the last finalised utterance was saved as. Lets the screen flag
     /// what was just said, and gives the backend queue something to enrich.

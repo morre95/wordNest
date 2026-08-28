@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/utterance_repository.dart';
@@ -25,7 +25,6 @@ class SpeakController extends Notifier<SpeakState> {
   static const provisionalTranslationDebounce = Duration(milliseconds: 300);
 
   Timer? _debounce;
-  StreamSubscription<SpeechEvent>? _events;
 
   /// Guards against a slow translation of an old partial overwriting a newer
   /// one. Each translation request carries the transcript revision it is for.
@@ -41,12 +40,54 @@ class SpeakController extends Notifier<SpeakState> {
 
   @override
   SpeakState build() {
-    _events = _recognizer.events.listen(_onSpeechEvent);
+    // Watched, not read: changing the engine in settings rebuilds this, which
+    // is what tears the old recogniser down and subscribes to the new one.
+    // Riverpod runs the previous build's onDispose first, so the old
+    // subscription is gone before this one exists.
+    final recognizer = ref.watch(speechRecognizerProvider);
+    final subscription = recognizer.events.listen(_onSpeechEvent);
+
+    // The cloud recogniser holds the microphone open itself rather than
+    // borrowing the platform's bounded session, so backgrounding the app would
+    // otherwise leave it listening and streaming with the app out of sight.
+    // Nothing about the privacy line would still be true.
+    final lifecycle = AppLifecycleListener(
+      onStateChange: (state) {
+        // `hidden` as well as `paused`: the app stops being visible before it
+        // is paused, and the microphone should not outlive the window it
+        // belongs to by even that much. Which state a platform actually
+        // reaches varies; both mean the user cannot see that we are listening.
+        if (state == AppLifecycleState.hidden ||
+            state == AppLifecycleState.paused) {
+          unawaited(cancelListening());
+        }
+      },
+    );
+
     ref.onDispose(() {
       _debounce?.cancel();
-      _events?.cancel();
+      subscription.cancel();
+      lifecycle.dispose();
     });
-    return SpeakState(pair: ref.read(initialLanguagePairProvider));
+
+    // A rebuild here means the engine changed, not that the screen is new. The
+    // session belonged to the old recogniser and went with it, so the
+    // transcript and route go too — but the language pair and the hands-free
+    // toggle are the user's choices, not the recogniser's, and survive.
+    final carried = _carried;
+    return carried == null
+        ? SpeakState(pair: ref.read(initialLanguagePairProvider))
+        : SpeakState(pair: carried.pair, mode: carried.mode);
+  }
+
+  /// The last state this notifier held, so an engine change can carry the
+  /// user's choices across the rebuild.
+  SpeakState? _carried;
+
+  @override
+  bool updateShouldNotify(SpeakState previous, SpeakState next) {
+    _carried = next;
+    return previous != next;
   }
 
   // --- User intents -------------------------------------------------------
@@ -197,8 +238,8 @@ class SpeakController extends Notifier<SpeakState> {
       case SpeechLifecycleChanged(:final lifecycle):
         _applyLifecycle(lifecycle);
 
-      case SpeechRouteChanged(:final isOnDevice):
-        state = state.copyWith(isRecognitionOnDevice: isOnDevice);
+      case SpeechRouteChanged(:final route):
+        state = state.copyWith(recognitionRoute: route);
 
       case SpeechFailed(:final failure):
         state = state.copyWith(
@@ -338,6 +379,7 @@ class SpeakController extends Notifier<SpeakState> {
         SpeechFailureKind.localeUnsupported =>
           LanguageNotRecognised(state.pair.source),
         SpeechFailureKind.noSpeechDetected => const NothingHeard(),
+        SpeechFailureKind.serviceUnreachable => const SpeechServiceUnreachable(),
         SpeechFailureKind.recognitionFailed =>
           RecognitionFailed(detail: failure.detail),
       };

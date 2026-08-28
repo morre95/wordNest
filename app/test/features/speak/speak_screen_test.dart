@@ -70,11 +70,27 @@ void main() {
       (tester) async {
     await pumpSpeakScreen(tester);
 
-    recognizer.emitRoute(isOnDevice: false);
+    recognizer.emitRoute(SpeechRoute.phoneOnline);
     await tester.pumpAndSettle();
 
     expect(
       find.text('Recognised by your phone online. Nothing is recorded.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('names both hops when the voice goes through WordNest',
+      (tester) async {
+    await pumpSpeakScreen(tester);
+
+    recognizer.emitRoute(SpeechRoute.wordnestServer);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        "Your voice goes to WordNest's server, then to Deepgram. "
+        'Nothing is kept.',
+      ),
       findsOneWidget,
     );
   });

@@ -16,8 +16,15 @@ import 'db/utterance_repository.dart';
 import 'models/language.dart';
 import 'permissions/microphone_permission.dart';
 import 'settings/language_preferences.dart';
+import 'settings/speech_engine_controller.dart';
+import 'settings/speech_engine_preferences.dart';
+import 'speech/deepgram_speech_recognizer.dart';
+import 'speech/fallback_speech_recognizer.dart';
+import 'speech/microphone_stream.dart';
 import 'speech/platform_speech_recognizer.dart';
+import 'speech/speech_engine.dart';
 import 'speech/speech_recognizer.dart';
+import 'speech/speech_socket.dart';
 import 'translation/backend_translator.dart';
 import 'tts/platform_speaker.dart';
 import 'tts/speaker.dart';
@@ -42,8 +49,78 @@ final microphonePermissionsProvider = Provider<MicrophonePermissions>(
   (ref) => const PlatformMicrophonePermissions(),
 );
 
+/// The recogniser choice read from storage before the first frame, alongside
+/// the language pair. Which recogniser exists is decided by this, so learning
+/// it late would mean building one and immediately throwing it away.
+///
+/// Overridden in `main()` and in tests; never used unoverridden.
+final initialSpeechEngineProvider = Provider<SpeechEngine>(
+  (ref) => throw StateError(
+    'initialSpeechEngineProvider must be overridden with the stored engine',
+  ),
+);
+
+final speechEnginePreferencesProvider = Provider<SpeechEnginePreferences>(
+  (ref) => SharedPreferencesSpeechEnginePreferences(),
+);
+
+final speechEngineProvider =
+    NotifierProvider<SpeechEngineController, SpeechEngine>(
+  SpeechEngineController.new,
+);
+
+final microphoneStreamProvider = Provider<MicrophoneStream>((ref) {
+  final microphone = RecordMicrophoneStream();
+  ref.onDispose(microphone.dispose);
+  return microphone;
+});
+
+final speechSocketFactoryProvider =
+    Provider<SpeechSocketFactory>((ref) => connectSpeechSocket);
+
+/// Supplies the speech socket's bearer token.
+///
+/// A closure rather than the `AccessTokens` interface the HTTP client uses:
+/// that interface lives beside dio, and nothing under `core/speech` may import
+/// dio. A function type crosses the boundary where the interface cannot.
+final speechCredentialsProvider = Provider<SpeechCredentials>((ref) {
+  return ({bool renew = false}) {
+    final sessions = ref.read(sessionManagerProvider);
+    return renew ? sessions.renew() : sessions.current();
+  };
+});
+
+/// Builds the recogniser for an engine.
+///
+/// A seam rather than a convenience: without it, a test of the engine switch
+/// would have to construct a real [PlatformSpeechRecognizer] and its platform
+/// channels just to watch one recogniser be replaced by another.
+final speechRecognizerFactoryProvider =
+    Provider<SpeechRecognizer Function(SpeechEngine)>((ref) {
+  return (engine) => switch (engine) {
+        SpeechEngine.phone => PlatformSpeechRecognizer(),
+        // Wrapped rather than used bare: a cloud recogniser that cannot reach
+        // its server would otherwise leave the microphone dead, in an app whose
+        // whole promise is that it works without a connection.
+        SpeechEngine.deepgram => FallbackSpeechRecognizer(
+            preferred: DeepgramSpeechRecognizer(
+              microphone: ref.read(microphoneStreamProvider),
+              connect: ref.read(speechSocketFactoryProvider),
+              credentials: ref.read(speechCredentialsProvider),
+            ),
+            fallback: PlatformSpeechRecognizer(),
+          ),
+      };
+});
+
+/// The recogniser the app is currently set to use.
+///
+/// Watches the engine, so changing the setting tears this one down and builds
+/// the other. Riverpod runs the previous build's `onDispose` before the next
+/// build, so there is never a moment with two live recognisers.
 final speechRecognizerProvider = Provider<SpeechRecognizer>((ref) {
-  final recognizer = PlatformSpeechRecognizer();
+  final build = ref.watch(speechRecognizerFactoryProvider);
+  final recognizer = build(ref.watch(speechEngineProvider));
   ref.onDispose(recognizer.dispose);
   return recognizer;
 });

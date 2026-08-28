@@ -352,3 +352,82 @@ immediately, so there is nothing for streaming to improve — the specification
 asked to "consider" it "if it improves perceived latency", and here it does not.
 It is there for a client with no on-device model, where the wait would otherwise
 be silent.
+
+## Choosing a recogniser
+
+**The recogniser is a setting, and the phone is the default.** `SpeechEngine` is
+two values and the picker is a sheet of list tiles, not a switch: a switch would
+need relabelling the moment there is a third engine, and a bare one announces
+"on"/"off" to a screen reader with no idea what it toggles. Trade-off: a sheet
+for two options is more UI than a toggle; it is the same shape as the language
+picker, and it is what the accessibility test passes without special pleading.
+
+**Audio goes through WordNest's own service, not straight to Deepgram.** The
+alternative — a short-lived token minted by the backend and used by the app to
+open a socket to Deepgram directly — is Deepgram's own advice for client apps
+and would be roughly half the latency. Relaying was chosen anyway, so the key
+never exists on a device, the vendor is swappable in one file, and the app
+speaks WordNest's frame vocabulary rather than Deepgram's. Trade-off: two hops
+instead of one, and the service now carries live audio, which is the thing it
+previously could say it never did.
+
+**The audio guard names its exceptions rather than being relaxed.** The old test
+forbade disk and, despite its own wording, nothing else — `web_socket_channel`,
+`record` and `dart:typed_data` all passed it, so any file in the pipeline could
+have streamed the microphone out unnoticed. It now carries an explicit map of
+which package each of two named files may import, bans byte buffers and
+connection types by identifier as well as by import (`flutter/foundation`
+re-exports `Uint8List`), refuses any accumulating type, and asserts that the
+recogniser holding the session imports no package at all. Widening that map is
+the visible act that says the promise changed. The disk prohibition is unchanged
+and absolute, carve-outs included.
+
+**The recorder is checked at the source, not on the filesystem.** `record`
+writes through native code to a native temp directory, which the runtime guard —
+which works by mocking `path_provider` — cannot see. So the guarantee is that
+`microphone_stream.dart` uses `startStream` and never names `.start(` or
+`path:`, and the filesystem watch is corroboration rather than the proof.
+
+**The socket opens before the microphone.** Stated as an ordering rule and
+tested as one, because it is what makes "nothing is buffered" structural rather
+than aspirational: there is no moment in which audio exists with nowhere to send
+it. Frames arriving after a socket closes are dropped, never queued — a retry
+buffer for unsent audio is a recording by another name.
+
+**A cloud session that cannot connect falls back to the phone.** Otherwise
+choosing Deepgram would quietly delete the app's one unconditional promise, that
+the microphone works with no connection. `FallbackSpeechRecognizer` owns both
+and forwards only the active one's events, so the privacy line names the
+recogniser that actually ran. The fallback is limited to failures the phone
+could actually do better on: a refused microphone or an unrecognised language
+fails the same way on both, and falling back would only delay the truth.
+
+**Backgrounding the app ends the session.** `speech_to_text` borrowed the
+platform's bounded recognition session; `record` does not, so a hands-free
+Deepgram session would otherwise survive a home-button press and keep streaming
+with the window out of sight. `SpeakController` watches the lifecycle and
+cancels on `hidden` or `paused` — both, because which one a platform reaches
+varies and either means the user cannot see that we are listening.
+
+**`SpeechRouteChanged` carries an enum, not a bool.** Three routes now: the
+phone offline, the phone's own online recogniser, and WordNest's server. An enum
+makes the privacy line a total function of the route, so a fourth engine cannot
+ship while the screen still describes the third.
+
+**The engine is read before the first frame, concurrently with the pair.**
+`main()` still awaits one round trip's worth of storage, now via `Future.wait`
+rather than one read. Reading it lazily was the alternative and would have put a
+storage read on the path between a cold start and the microphone; which
+recogniser to build is known at launch, so learning it late would mean building
+one and immediately discarding it.
+
+**Deepgram's language list is not mirrored anywhere.** It changes — Gujarati and
+Thai were added to nova-3 during 2026 — so the app sends the language, Deepgram
+refuses what it cannot do, and the refusal becomes an error frame the app turns
+into a fallback. The same shape as the on-device/online fallback inside the
+platform recogniser.
+
+**The relay has its own rate limit and its own session ceiling.** Transcription
+is billed by the minute of audio rather than by the request, so a client that
+stops sending without closing must not be able to hold a paid upstream session
+open for as long as its socket survives.
