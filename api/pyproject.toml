@@ -17,6 +17,8 @@ dependencies = [
     "aiosqlite>=0.22.0",
     "pyjwt>=2.11.0",
     "email-validator>=2.3.0",
+    # The magic link email goes out over Resend's HTTP API.
+    "httpx>=0.28.0",
     # The Deepgram client. Present transitively via uvicorn[standard], which is
     # not a contract to rely on for something the speech relay imports directly.
     "websockets>=15.0",
@@ -26,7 +28,6 @@ dependencies = [
 dev = [
     "pytest>=9.0.0",
     "pytest-asyncio>=1.3.0",
-    "httpx>=0.28.0",
     "ruff>=0.15.0",
 ]
 

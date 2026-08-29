@@ -55,7 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.speech_rate_limiter = TokenBucketRateLimiter(
             limit_per_minute=settings.speech_rate_limit_per_minute
         )
-        app.state.email_sender = build_email_sender(settings.is_production)
+        app.state.email_sender = build_email_sender(settings)
         engine = create_engine(settings)
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)

@@ -81,6 +81,17 @@ class UnsupportedSpeechLanguageError(WordNestError):
     code = "SPEECH_LANGUAGE_UNSUPPORTED"
 
 
+class EmailUndeliverableError(WordNestError):
+    """The provider would not accept the magic link email.
+
+    The address may still be fine — the provider is simply unreachable or
+    refusing — so this is a retry, not a rejection of what the caller asked.
+    """
+
+    status_code = HTTPStatus.SERVICE_UNAVAILABLE
+    code = "EMAIL_UNDELIVERABLE"
+
+
 def _envelope(
     status_code: int,
     code: str,

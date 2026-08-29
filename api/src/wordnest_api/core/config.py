@@ -38,6 +38,16 @@ class SpeechProviderName(StrEnum):
     fake = "fake"
 
 
+class EmailProviderName(StrEnum):
+    """Which implementation delivers the magic link."""
+
+    resend = "resend"
+
+    #: Writes the link to the log instead of sending it. Never selectable in
+    #: production: a magic link in a log is a way into someone's account.
+    logging = "logging"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="WORDNEST_",
@@ -89,6 +99,17 @@ class Settings(BaseSettings):
     #: rather than going straight from the phone.
     deepgram_api_key: str | None = None
     deepgram_model: str = "nova-3"
+
+    email_provider: EmailProviderName = EmailProviderName.logging
+
+    #: Supplied as WORDNEST_RESEND_API_KEY. Required when the email provider is
+    #: `resend`.
+    resend_api_key: str | None = None
+
+    #: The From header on the magic link email, as "Name <address>" or a bare
+    #: address. The domain must be one verified with the provider, or the
+    #: provider rejects the send. Required when the email provider is `resend`.
+    email_from_address: str | None = None
 
     #: A hard ceiling on one speech session. Transcription is billed by the
     #: minute of audio, so a client that stops sending without closing must not
