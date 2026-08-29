@@ -12,15 +12,13 @@ WORKDIR /app
 # Dependencies first, in their own layer, so editing source does not reinstall
 # the world.
 COPY pyproject.toml uv.lock README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project --no-dev
+RUN uv sync --locked --no-install-project --no-dev
 
 COPY src ./src
 COPY prompts ./prompts
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
+RUN uv sync --locked --no-dev
 
 
 FROM python:3.12-slim-bookworm AS runtime
