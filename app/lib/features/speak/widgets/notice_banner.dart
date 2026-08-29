@@ -111,7 +111,20 @@ class NoticeBanner extends StatelessWidget {
               child: const Text('Settings'),
             ),
           ),
-        RecognitionFailed() => ('Speech recognition stopped unexpectedly.', null),
+        SpeechNetworkUnavailable() => (
+            'Speech recognition needs a connection for this language, and '
+            'could not get one.',
+            null,
+          ),
+        MicrophoneUnavailable() => (
+            'The microphone is not available — close anything else using it '
+            'and try again.',
+            null,
+          ),
+        RecognitionFailed() => (
+            'Speech recognition stopped unexpectedly. Try again.',
+            null,
+          ),
         TranslationFailed() => ('That could not be translated just now.', null),
         CouldNotSave() => ('That sentence could not be saved to your glossary.', null),
       };

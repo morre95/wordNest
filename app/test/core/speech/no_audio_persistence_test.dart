@@ -347,7 +347,12 @@ void main() {
       await tester.pump();
 
       // A full session: start, several partials, a pause, a final result.
-      await tester.tap(find.byType(MicButton));
+      // Held rather than tapped: the mic button is hold-to-talk, and a tap is
+      // a press and a release, which closes the session it just opened.
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(MicButton)),
+      );
+      addTearDown(() async => gesture.up());
       await tester.pump();
       recognizer
         ..emitSoundLevel(0.4)
@@ -393,7 +398,10 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(find.byType(MicButton));
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(MicButton)),
+      );
+      addTearDown(() async => gesture.up());
       await tester.pump();
       recognizer
         ..emitSoundLevel(0.9)
@@ -438,7 +446,10 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(find.byType(MicButton));
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(MicButton)),
+      );
+      addTearDown(() async => gesture.up());
       await tester.pump();
       for (var frame = 0; frame < 8; frame++) {
         microphone.emitSpeech();

@@ -26,6 +26,14 @@ class SpeakController extends Notifier<SpeakState> {
 
   Timer? _debounce;
 
+  /// Whether the user currently wants a session, as opposed to whether one is
+  /// running. Opening the microphone is asynchronous — the permission check,
+  /// then the platform's own start — and a release that lands inside that
+  /// window must still close it. [SpeakState.isListening] cannot serve as that
+  /// guard: it describes what the screen shows, and is only true once the
+  /// session is really open.
+  bool _sessionWanted = false;
+
   /// Guards against a slow translation of an old partial overwriting a newer
   /// one. Each translation request carries the transcript revision it is for.
   int _transcriptRevision = 0;
@@ -97,10 +105,17 @@ class SpeakController extends Notifier<SpeakState> {
   /// Never throws: every failure becomes a [SpeakNotice] the screen can render,
   /// because a broken microphone must not take the screen down with it.
   Future<void> startListening({ListeningMode mode = ListeningMode.single}) async {
-    if (state.isListening) return;
+    if (_sessionWanted) return;
+    _sessionWanted = true;
 
     final access = await _ensureMicrophone();
-    if (access != MicrophoneAccess.granted) return;
+    if (access != MicrophoneAccess.granted) {
+      _sessionWanted = false;
+      return;
+    }
+    // Released before the microphone was ever opened. Nothing was said, so
+    // there is nothing to finalise and nothing to open.
+    if (!_sessionWanted) return;
 
     state = state.copyWith(
       status: SpeakStatus.listening,
@@ -117,15 +132,25 @@ class SpeakController extends Notifier<SpeakState> {
         mode: mode,
       );
     } on SpeechFailure catch (failure) {
+      _sessionWanted = false;
       state = state.copyWith(
         status: SpeakStatus.idle,
         notice: _noticeFor(failure),
       );
+      return;
     }
+
+    // The release can also land while the platform was still starting, by
+    // which point the session is open and has to be closed again.
+    if (!_sessionWanted) await cancelListening();
   }
 
   /// Ends the session and lets the recogniser finalise what it heard.
   Future<void> stopListening() async {
+    if (!_sessionWanted) return;
+    _sessionWanted = false;
+    // The session has not opened yet; the start still in flight sees the
+    // cleared intent and closes it. There is nothing to finalise.
     if (!state.isListening) return;
     state = state.copyWith(status: SpeakStatus.finalising);
     await _recognizer.stop();
@@ -133,6 +158,7 @@ class SpeakController extends Notifier<SpeakState> {
 
   /// Ends the session and throws away the in-flight utterance.
   Future<void> cancelListening() async {
+    _sessionWanted = false;
     _debounce?.cancel();
     await _recognizer.cancel();
     state = state.copyWith(
@@ -221,6 +247,9 @@ class SpeakController extends Notifier<SpeakState> {
       case SpeechFinal(:final text):
         _transcriptRevision++;
         _debounce?.cancel();
+        // Hands-free keeps the session alive across utterances; a single one
+        // ends here, and the next press has to be able to open a new one.
+        if (state.mode != ListeningMode.continuous) _sessionWanted = false;
         state = state.copyWith(
           sourceText: text,
           savedUtteranceId: null,
@@ -242,6 +271,9 @@ class SpeakController extends Notifier<SpeakState> {
         state = state.copyWith(recognitionRoute: route);
 
       case SpeechFailed(:final failure):
+        // The platform ends the session on a permanent failure whether we
+        // asked it to or not, so the intent goes with it.
+        if (failure.isPermanent) _sessionWanted = false;
         state = state.copyWith(
           status: failure.isPermanent ? SpeakStatus.idle : state.status,
           notice: _noticeFor(failure),
@@ -260,6 +292,9 @@ class SpeakController extends Notifier<SpeakState> {
           : SpeakStatus.idle,
       SpeechLifecycle.idle => SpeakStatus.idle,
     };
+    // However the session ended — the platform's own timeout as much as a
+    // release — reaching idle means there is no session to hold on to.
+    if (status == SpeakStatus.idle) _sessionWanted = false;
     if (status != state.status) state = state.copyWith(status: status);
   }
 
@@ -380,6 +415,9 @@ class SpeakController extends Notifier<SpeakState> {
           LanguageNotRecognised(state.pair.source),
         SpeechFailureKind.noSpeechDetected => const NothingHeard(),
         SpeechFailureKind.serviceUnreachable => const SpeechServiceUnreachable(),
+        SpeechFailureKind.networkUnavailable =>
+          const SpeechNetworkUnavailable(),
+        SpeechFailureKind.audioUnavailable => const MicrophoneUnavailable(),
         SpeechFailureKind.recognitionFailed =>
           RecognitionFailed(detail: failure.detail),
       };

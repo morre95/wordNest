@@ -100,6 +100,29 @@ class SpeechServiceUnreachable extends SpeakNotice {
   int get hashCode => (SpeechServiceUnreachable).hashCode;
 }
 
+/// The online recogniser could not be reached. Distinct from
+/// [SpeechServiceUnreachable], which is the cloud engine falling back to the
+/// phone: here the phone's own recogniser is the one that needed the network.
+class SpeechNetworkUnavailable extends SpeakNotice {
+  const SpeechNetworkUnavailable();
+
+  @override
+  bool operator ==(Object other) => other is SpeechNetworkUnavailable;
+  @override
+  int get hashCode => (SpeechNetworkUnavailable).hashCode;
+}
+
+/// The microphone could not be read, most often because something else holds
+/// it. Nothing to do with permission, which has its own notices.
+class MicrophoneUnavailable extends SpeakNotice {
+  const MicrophoneUnavailable();
+
+  @override
+  bool operator ==(Object other) => other is MicrophoneUnavailable;
+  @override
+  int get hashCode => (MicrophoneUnavailable).hashCode;
+}
+
 /// Recognition failed for a reason we cannot name usefully.
 class RecognitionFailed extends SpeakNotice {
   const RecognitionFailed({this.detail});

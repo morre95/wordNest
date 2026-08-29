@@ -46,6 +46,14 @@ enum SpeechFailureKind {
   /// and the phone's own recogniser can still be asked instead.
   serviceUnreachable,
 
+  /// The recogniser needed a network it could not reach, or the service
+  /// behind it refused. Only the online recogniser can fail this way.
+  networkUnavailable,
+
+  /// The microphone itself could not be read — held by another app, or a
+  /// capture error. Nothing about the language or the network is wrong.
+  audioUnavailable,
+
   /// Anything the platform reported that we cannot act on specifically.
   recognitionFailed,
 }

@@ -419,4 +419,66 @@ void main() {
       expect(recognizer.cancelCount, 1);
     });
   });
+
+  group('a press and a release that race each other', () {
+    // Opening the microphone is asynchronous: the permission check, then the
+    // platform's own start. A hold-to-talk release can land inside that
+    // window, and the widget layer does not await either call.
+
+    test('a release during the permission check closes the session', () async {
+      final container = makeContainer();
+      final controller = container.read(speakControllerProvider.notifier);
+
+      final starting = controller.startListening();
+      await controller.stopListening();
+      await starting;
+      await settle();
+
+      expect(recognizer.isListening, isFalse);
+      expect(container.read(speakControllerProvider).status, SpeakStatus.idle);
+    });
+
+    test('a later press still opens a new session', () async {
+      final container = makeContainer();
+      final controller = container.read(speakControllerProvider.notifier);
+
+      final starting = controller.startListening();
+      await controller.stopListening();
+      await starting;
+      await settle();
+
+      await controller.startListening();
+      await settle();
+
+      expect(recognizer.isListening, isTrue);
+      expect(
+        container.read(speakControllerProvider).status,
+        SpeakStatus.listening,
+      );
+    });
+
+    test('a session the platform ends by itself frees the next press',
+        () async {
+      final container = makeContainer();
+      final controller = container.read(speakControllerProvider.notifier);
+
+      await controller.startListening();
+      await settle();
+      // The platform gives up on its own — a timeout, a busy recogniser.
+      recognizer.emitFailure(
+        const SpeechFailure(SpeechFailureKind.recognitionFailed),
+      );
+      await settle();
+
+      await controller.startListening();
+      await settle();
+
+      expect(recognizer.startedLanguages, hasLength(2));
+      expect(
+        container.read(speakControllerProvider).status,
+        SpeakStatus.listening,
+      );
+    });
+  });
+
 }
