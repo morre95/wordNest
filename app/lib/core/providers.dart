@@ -15,6 +15,7 @@ import 'db/review_repository.dart';
 import 'db/utterance_repository.dart';
 import 'models/language.dart';
 import 'permissions/microphone_permission.dart';
+import 'platform/on_device_speech_models.dart';
 import 'settings/language_preferences.dart';
 import 'settings/speech_engine_controller.dart';
 import 'settings/speech_engine_preferences.dart';
@@ -66,8 +67,8 @@ final speechEnginePreferencesProvider = Provider<SpeechEnginePreferences>(
 
 final speechEngineProvider =
     NotifierProvider<SpeechEngineController, SpeechEngine>(
-  SpeechEngineController.new,
-);
+      SpeechEngineController.new,
+    );
 
 final microphoneStreamProvider = Provider<MicrophoneStream>((ref) {
   final microphone = RecordMicrophoneStream();
@@ -75,8 +76,13 @@ final microphoneStreamProvider = Provider<MicrophoneStream>((ref) {
   return microphone;
 });
 
-final speechSocketFactoryProvider =
-    Provider<SpeechSocketFactory>((ref) => connectSpeechSocket);
+final speechSocketFactoryProvider = Provider<SpeechSocketFactory>(
+  (ref) => connectSpeechSocket,
+);
+
+final onDeviceSpeechModelsProvider = Provider<OnDeviceSpeechModels>(
+  (ref) => const PlatformOnDeviceSpeechModels(),
+);
 
 /// Supplies the speech socket's bearer token.
 ///
@@ -97,21 +103,24 @@ final speechCredentialsProvider = Provider<SpeechCredentials>((ref) {
 /// channels just to watch one recogniser be replaced by another.
 final speechRecognizerFactoryProvider =
     Provider<SpeechRecognizer Function(SpeechEngine)>((ref) {
-  return (engine) => switch (engine) {
-        SpeechEngine.phone => PlatformSpeechRecognizer(),
+      final onDeviceModels = ref.watch(onDeviceSpeechModelsProvider);
+      return (engine) => switch (engine) {
+        SpeechEngine.phone => PlatformSpeechRecognizer(
+          onDeviceModels: onDeviceModels,
+        ),
         // Wrapped rather than used bare: a cloud recogniser that cannot reach
         // its server would otherwise leave the microphone dead, in an app whose
         // whole promise is that it works without a connection.
         SpeechEngine.deepgram => FallbackSpeechRecognizer(
-            preferred: DeepgramSpeechRecognizer(
-              microphone: ref.read(microphoneStreamProvider),
-              connect: ref.read(speechSocketFactoryProvider),
-              credentials: ref.read(speechCredentialsProvider),
-            ),
-            fallback: PlatformSpeechRecognizer(),
+          preferred: DeepgramSpeechRecognizer(
+            microphone: ref.read(microphoneStreamProvider),
+            connect: ref.read(speechSocketFactoryProvider),
+            credentials: ref.read(speechCredentialsProvider),
           ),
+          fallback: PlatformSpeechRecognizer(onDeviceModels: onDeviceModels),
+        ),
       };
-});
+    });
 
 /// The recogniser the app is currently set to use.
 ///
@@ -166,14 +175,14 @@ final Provider<AuthApi> authApiProvider = Provider<AuthApi>(
 
 final Provider<SessionManager> sessionManagerProvider =
     Provider<SessionManager>((ref) {
-  final manager = SessionManager(
-    authApi: ref.watch(authApiProvider),
-    sessionStore: PreferencesSessionStore(),
-    deviceIdentity: PlatformDeviceIdentity(),
-  );
-  ref.onDispose(manager.dispose);
-  return manager;
-});
+      final manager = SessionManager(
+        authApi: ref.watch(authApiProvider),
+        sessionStore: PreferencesSessionStore(),
+        deviceIdentity: PlatformDeviceIdentity(),
+      );
+      ref.onDispose(manager.dispose);
+      return manager;
+    });
 
 final syncRepositoryProvider = Provider<SyncRepository>(
   (ref) => SyncRepository(database: ref.watch(databaseProvider)),

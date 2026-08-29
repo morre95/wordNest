@@ -33,8 +33,8 @@ class MicButton extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isActive = status != SpeakStatus.idle;
     final label = switch (status) {
-      SpeakStatus.idle =>
-        isHandsFree ? 'Start listening' : 'Hold to speak',
+      SpeakStatus.idle => isHandsFree ? 'Start listening' : 'Hold to speak',
+      SpeakStatus.starting => 'Starting speech recognition',
       SpeakStatus.listening => 'Listening. Release to finish.',
       SpeakStatus.finalising => 'Finishing up',
     };
@@ -65,7 +65,9 @@ class MicButton extends StatelessWidget {
             ],
           ),
           child: Icon(
-            status == SpeakStatus.finalising ? Icons.more_horiz : Icons.mic,
+            status == SpeakStatus.starting || status == SpeakStatus.finalising
+                ? Icons.more_horiz
+                : Icons.mic,
             size: 56,
             color: isActive ? scheme.onPrimary : scheme.onPrimaryContainer,
           ),

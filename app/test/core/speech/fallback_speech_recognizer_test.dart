@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wordnest/core/speech/fallback_speech_recognizer.dart';
 import 'package:wordnest/core/speech/speech_recognizer.dart';
@@ -46,8 +48,9 @@ void main() {
   test('the fallback says where the voice actually went', () async {
     // This is what keeps the fallback honest: the privacy line follows the
     // recogniser that ran, not the one the user picked.
-    preferred.failOnStart =
-        const SpeechFailure(SpeechFailureKind.serviceUnreachable);
+    preferred.failOnStart = const SpeechFailure(
+      SpeechFailureKind.serviceUnreachable,
+    );
     await recognizer.start(languageCode: 'en');
 
     fallback.emitRoute(SpeechRoute.onDevice);
@@ -61,8 +64,9 @@ void main() {
 
   test('a refused microphone is not something the phone can fix', () async {
     // Falling back here would just delay the same refusal.
-    preferred.failOnStart =
-        const SpeechFailure(SpeechFailureKind.permissionDenied);
+    preferred.failOnStart = const SpeechFailure(
+      SpeechFailureKind.permissionDenied,
+    );
 
     await expectLater(
       recognizer.start(languageCode: 'en'),
@@ -72,8 +76,9 @@ void main() {
   });
 
   test('an unrecognised language is not something the phone can fix', () async {
-    preferred.failOnStart =
-        const SpeechFailure(SpeechFailureKind.localeUnsupported);
+    preferred.failOnStart = const SpeechFailure(
+      SpeechFailureKind.localeUnsupported,
+    );
 
     await expectLater(
       recognizer.start(languageCode: 'cy'),
@@ -90,15 +95,15 @@ void main() {
     preferred.emitFinal('from the right one');
     await pumpEventQueue();
 
-    expect(
-      events.whereType<SpeechFinal>().map((event) => event.text),
-      ['from the right one'],
-    );
+    expect(events.whereType<SpeechFinal>().map((event) => event.text), [
+      'from the right one',
+    ]);
   });
 
   test('stop and cancel reach the recogniser that is listening', () async {
-    preferred.failOnStart =
-        const SpeechFailure(SpeechFailureKind.serviceUnreachable);
+    preferred.failOnStart = const SpeechFailure(
+      SpeechFailureKind.serviceUnreachable,
+    );
     await recognizer.start(languageCode: 'en');
 
     await recognizer.stop();
@@ -107,6 +112,21 @@ void main() {
     expect(fallback.stopCount, 1);
     expect(fallback.cancelCount, 1);
     expect(preferred.stopCount, 0);
+  });
+
+  test('a cancelled start cannot open an ownerless microphone', () async {
+    final gate = Completer<void>();
+    preferred.startGate = gate.future;
+
+    final starting = recognizer.start(languageCode: 'en');
+    await pumpEventQueue();
+    await recognizer.cancel();
+    gate.complete();
+    await starting;
+
+    expect(preferred.isListening, isFalse);
+    expect(preferred.cancelCount, 2);
+    expect(fallback.startedLanguages, isEmpty);
   });
 
   test('disposing takes both children with it', () async {

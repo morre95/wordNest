@@ -11,6 +11,9 @@ enum SpeakStatus {
   /// Not listening. Tap or hold to start.
   idle,
 
+  /// The user is holding the control while the platform opens the microphone.
+  starting,
+
   /// Microphone is open and partials are arriving.
   listening,
 

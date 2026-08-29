@@ -12,6 +12,7 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
     this.available = true,
     this.locales = const ['en_US', 'es_ES', 'sv_SE'],
     this.failOnStart,
+    this.announceListening = true,
   });
 
   bool available;
@@ -19,6 +20,8 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
 
   /// When set, [start] throws this instead of starting a session.
   SpeechFailure? failOnStart;
+  bool announceListening;
+  Future<void>? startGate;
 
   final _events = StreamController<SpeechEvent>.broadcast();
   final startedLanguages = <String>[];
@@ -52,10 +55,15 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
     required String languageCode,
     ListeningMode mode = ListeningMode.single,
   }) async {
+    final gate = startGate;
+    if (gate != null) await gate;
     if (failOnStart != null) throw failOnStart!;
     startedLanguages.add(languageCode);
     startedModes.add(mode);
     _listening = true;
+    if (announceListening) {
+      _events.add(const SpeechLifecycleChanged(SpeechLifecycle.listening));
+    }
   }
 
   @override

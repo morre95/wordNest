@@ -164,9 +164,9 @@ abstract interface class SpeechRecognizer {
 
   /// Platform locale identifiers this device lists, e.g. `en_US`.
   ///
-  /// On Android this is the *on-device* recogniser's list; the networked one
-  /// handles languages that never appear here. Treat a miss as "no offline
-  /// model", not as "cannot be recognised" — see [resolveSpeechLocale].
+  /// This is a language-selection list, not proof that an offline model is
+  /// installed. Android distinguishes installed models from models that are
+  /// merely supported, and callers must not infer one from the other.
   Future<List<String>> availableLocaleIds();
 
   /// A single broadcast stream of text-only events.
@@ -189,19 +189,16 @@ abstract interface class SpeechRecognizer {
   Future<void> dispose();
 }
 
-/// The locale to ask the platform recogniser for, and whether the device has
-/// an offline model for it.
+/// The locale to ask the platform recogniser for, and whether the supplied
+/// candidate list contained a matching language.
 typedef SpeechLocale = ({String localeId, bool hasOnDeviceModel});
 
 /// Chooses the platform speech locale to use for a BCP-47 language tag.
 ///
-/// [availableLocaleIds] is what the device reports, which on Android covers the
-/// *on-device* recogniser only — its networked recogniser understands far more
-/// languages than it will list. So a language missing from the list is not a
-/// language this phone cannot hear, and we never refuse on that basis: an
-/// unlisted language falls back to the bare tag with [hasOnDeviceModel] false,
-/// which tells the caller to skip the offline recogniser rather than the
-/// session.
+/// When [availableLocaleIds] is an installed-model list, the boolean says an
+/// offline model is ready. When it is the broader list from `speech_to_text`,
+/// callers use the locale choice only. A miss never means the phone cannot
+/// recognise the language online: it falls back to the bare primary tag.
 ///
 /// Pure so it can be tested against the awkward cases: a device that only has
 /// `en_GB` when we asked for English, a device that lists nothing for the

@@ -25,6 +25,7 @@ class SpeakController extends Notifier<SpeakState> {
   static const provisionalTranslationDebounce = Duration(milliseconds: 300);
 
   Timer? _debounce;
+  Future<void>? _cancelling;
 
   /// Whether the user currently wants a session, as opposed to whether one is
   /// running. Opening the microphone is asynchronous — the permission check,
@@ -104,7 +105,9 @@ class SpeakController extends Notifier<SpeakState> {
   ///
   /// Never throws: every failure becomes a [SpeakNotice] the screen can render,
   /// because a broken microphone must not take the screen down with it.
-  Future<void> startListening({ListeningMode mode = ListeningMode.single}) async {
+  Future<void> startListening({
+    ListeningMode mode = ListeningMode.single,
+  }) async {
     if (_sessionWanted) return;
     _sessionWanted = true;
 
@@ -118,7 +121,7 @@ class SpeakController extends Notifier<SpeakState> {
     if (!_sessionWanted) return;
 
     state = state.copyWith(
-      status: SpeakStatus.listening,
+      status: SpeakStatus.starting,
       mode: mode,
       notice: null,
       sourceText: '',
@@ -127,10 +130,7 @@ class SpeakController extends Notifier<SpeakState> {
     );
 
     try {
-      await _recognizer.start(
-        languageCode: state.pair.source.code,
-        mode: mode,
-      );
+      await _recognizer.start(languageCode: state.pair.source.code, mode: mode);
     } on SpeechFailure catch (failure) {
       _sessionWanted = false;
       state = state.copyWith(
@@ -149,15 +149,33 @@ class SpeakController extends Notifier<SpeakState> {
   Future<void> stopListening() async {
     if (!_sessionWanted) return;
     _sessionWanted = false;
-    // The session has not opened yet; the start still in flight sees the
-    // cleared intent and closes it. There is nothing to finalise.
+    // The platform may have opened the microphone while its `listening` event
+    // is still queued for this controller. Cancel a starting session now as
+    // well as letting startListening's intent check close it afterwards.
+    if (state.status == SpeakStatus.starting) {
+      await _recognizer.cancel();
+      state = state.copyWith(status: SpeakStatus.idle, soundLevel: 0);
+      return;
+    }
     if (!state.isListening) return;
     state = state.copyWith(status: SpeakStatus.finalising);
     await _recognizer.stop();
   }
 
   /// Ends the session and throws away the in-flight utterance.
-  Future<void> cancelListening() async {
+  Future<void> cancelListening() {
+    final underway = _cancelling;
+    if (underway != null) return underway;
+
+    late final Future<void> tracked;
+    tracked = _cancelListening().whenComplete(() {
+      if (identical(_cancelling, tracked)) _cancelling = null;
+    });
+    _cancelling = tracked;
+    return tracked;
+  }
+
+  Future<void> _cancelListening() async {
     _sessionWanted = false;
     _debounce?.cancel();
     await _recognizer.cancel();
@@ -225,9 +243,7 @@ class SpeakController extends Notifier<SpeakState> {
         );
       }
     } on TranslationFailure {
-      state = state.copyWith(
-        notice: TranslationModelDownloadFailed(language),
-      );
+      state = state.copyWith(notice: TranslationModelDownloadFailed(language));
     }
   }
 
@@ -287,9 +303,10 @@ class SpeakController extends Notifier<SpeakState> {
       SpeechLifecycle.processing =>
         state.isListening ? SpeakStatus.finalising : state.status,
       // A `done` in hands-free mode is the gap between utterances, not the end.
-      SpeechLifecycle.done => state.mode == ListeningMode.continuous
-          ? state.status
-          : SpeakStatus.idle,
+      SpeechLifecycle.done =>
+        state.mode == ListeningMode.continuous
+            ? state.status
+            : SpeakStatus.idle,
       SpeechLifecycle.idle => SpeakStatus.idle,
     };
     // However the session ended — the platform's own timeout as much as a
@@ -407,32 +424,35 @@ class SpeakController extends Notifier<SpeakState> {
       };
 
   SpeakNotice _noticeFor(SpeechFailure failure) => switch (failure.kind) {
-        SpeechFailureKind.permissionDenied => const MicrophoneDenied(),
-        SpeechFailureKind.permissionPermanentlyDenied =>
-          const MicrophoneBlocked(),
-        SpeechFailureKind.unavailable => const RecognitionUnavailable(),
-        SpeechFailureKind.localeUnsupported =>
-          LanguageNotRecognised(state.pair.source),
-        SpeechFailureKind.noSpeechDetected => const NothingHeard(),
-        SpeechFailureKind.serviceUnreachable => const SpeechServiceUnreachable(),
-        SpeechFailureKind.networkUnavailable =>
-          const SpeechNetworkUnavailable(),
-        SpeechFailureKind.audioUnavailable => const MicrophoneUnavailable(),
-        SpeechFailureKind.recognitionFailed =>
-          RecognitionFailed(detail: failure.detail),
-      };
+    SpeechFailureKind.permissionDenied => const MicrophoneDenied(),
+    SpeechFailureKind.permissionPermanentlyDenied => const MicrophoneBlocked(),
+    SpeechFailureKind.unavailable => const RecognitionUnavailable(),
+    SpeechFailureKind.localeUnsupported => LanguageNotRecognised(
+      state.pair.source,
+    ),
+    SpeechFailureKind.noSpeechDetected => const NothingHeard(),
+    SpeechFailureKind.serviceUnreachable => const SpeechServiceUnreachable(),
+    SpeechFailureKind.networkUnavailable => const SpeechNetworkUnavailable(),
+    SpeechFailureKind.audioUnavailable => const MicrophoneUnavailable(),
+    SpeechFailureKind.recognitionFailed => RecognitionFailed(
+      detail: failure.detail,
+    ),
+  };
 
   SpeakNotice _noticeForTranslation(TranslationFailure failure) =>
       switch (failure.kind) {
-        TranslationFailureKind.modelMissing =>
-          TranslationModelMissing(failure.language ?? state.pair.target),
+        TranslationFailureKind.modelMissing => TranslationModelMissing(
+          failure.language ?? state.pair.target,
+        ),
         TranslationFailureKind.modelDownloadFailed =>
           TranslationModelDownloadFailed(failure.language ?? state.pair.target),
         TranslationFailureKind.pairUnsupported ||
-        TranslationFailureKind.translationFailed =>
-          TranslationFailed(detail: failure.detail),
+        TranslationFailureKind.translationFailed => TranslationFailed(
+          detail: failure.detail,
+        ),
       };
 }
 
-final speakControllerProvider =
-    NotifierProvider<SpeakController, SpeakState>(SpeakController.new);
+final speakControllerProvider = NotifierProvider<SpeakController, SpeakState>(
+  SpeakController.new,
+);

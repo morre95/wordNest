@@ -38,13 +38,13 @@ void main() {
   });
 
   ProviderContainer makeContainer() => ProviderContainer.test(
-        overrides: speakOverrides(
-          recognizer: recognizer,
-          translator: translator,
-          permissions: permissions,
-          preferences: preferences,
-        ),
-      );
+    overrides: speakOverrides(
+      recognizer: recognizer,
+      translator: translator,
+      permissions: permissions,
+      preferences: preferences,
+    ),
+  );
 
   /// Lets the recogniser's broadcast stream deliver and any translation
   /// microtasks settle.
@@ -59,8 +59,10 @@ void main() {
 
       expect(recognizer.startedLanguages, ['en']);
       expect(recognizer.startedModes, [ListeningMode.single]);
-      expect(container.read(speakControllerProvider).status,
-          SpeakStatus.listening);
+      expect(
+        container.read(speakControllerProvider).status,
+        SpeakStatus.listening,
+      );
     });
 
     test('requests permission once when it has not been granted yet', () async {
@@ -75,57 +77,63 @@ void main() {
       expect(recognizer.startedLanguages, ['en']);
     });
 
-    test('shows a blocked notice and does not listen when denied for good',
-        () async {
-      permissions.current = MicrophoneAccess.permanentlyDenied;
-      final container = makeContainer();
+    test(
+      'shows a blocked notice and does not listen when denied for good',
+      () async {
+        permissions.current = MicrophoneAccess.permanentlyDenied;
+        final container = makeContainer();
 
-      await container.read(speakControllerProvider.notifier).startListening();
+        await container.read(speakControllerProvider.notifier).startListening();
 
-      final state = container.read(speakControllerProvider);
-      expect(state.notice, const MicrophoneBlocked());
-      expect(state.status, SpeakStatus.idle);
-      expect(recognizer.startedLanguages, isEmpty);
-    });
+        final state = container.read(speakControllerProvider);
+        expect(state.notice, const MicrophoneBlocked());
+        expect(state.status, SpeakStatus.idle);
+        expect(recognizer.startedLanguages, isEmpty);
+      },
+    );
 
-    test('surfaces an unsupported locale as a notice, not an exception',
-        () async {
-      recognizer.failOnStart = const SpeechFailure(
-        SpeechFailureKind.localeUnsupported,
-        detail: 'en',
-      );
-      final container = makeContainer();
+    test(
+      'surfaces an unsupported locale as a notice, not an exception',
+      () async {
+        recognizer.failOnStart = const SpeechFailure(
+          SpeechFailureKind.localeUnsupported,
+          detail: 'en',
+        );
+        final container = makeContainer();
 
-      await container.read(speakControllerProvider.notifier).startListening();
+        await container.read(speakControllerProvider.notifier).startListening();
 
-      final state = container.read(speakControllerProvider);
-      expect(state.notice, isA<LanguageNotRecognised>());
-      expect(state.status, SpeakStatus.idle);
-    });
+        final state = container.read(speakControllerProvider);
+        expect(state.notice, isA<LanguageNotRecognised>());
+        expect(state.status, SpeakStatus.idle);
+      },
+    );
   });
 
   group('live transcription', () {
-    test('shows partials immediately and translates after the debounce',
-        () async {
-      final container = makeContainer();
-      final controller = container.read(speakControllerProvider.notifier);
-      await controller.startListening();
+    test(
+      'shows partials immediately and translates after the debounce',
+      () async {
+        final container = makeContainer();
+        final controller = container.read(speakControllerProvider.notifier);
+        await controller.startListening();
 
-      recognizer.emitPartial('hello');
-      await settle();
+        recognizer.emitPartial('hello');
+        await settle();
 
-      expect(container.read(speakControllerProvider).sourceText, 'hello');
-      expect(container.read(speakControllerProvider).translationText, '');
+        expect(container.read(speakControllerProvider).sourceText, 'hello');
+        expect(container.read(speakControllerProvider).translationText, '');
 
-      await Future<void>.delayed(
-        SpeakController.provisionalTranslationDebounce + Duration.zero,
-      );
-      await settle();
+        await Future<void>.delayed(
+          SpeakController.provisionalTranslationDebounce + Duration.zero,
+        );
+        await settle();
 
-      final state = container.read(speakControllerProvider);
-      expect(state.translationText, '[es] hello');
-      expect(state.isTranslationProvisional, isTrue);
-    });
+        final state = container.read(speakControllerProvider);
+        expect(state.translationText, '[es] hello');
+        expect(state.isTranslationProvisional, isTrue);
+      },
+    );
 
     test('coalesces a burst of partials into one translation', () async {
       final container = makeContainer();
@@ -199,8 +207,10 @@ void main() {
       recognizer.emitFinal('first');
       await settle();
 
-      expect(container.read(speakControllerProvider).status,
-          SpeakStatus.listening);
+      expect(
+        container.read(speakControllerProvider).status,
+        SpeakStatus.listening,
+      );
     });
   });
 
@@ -209,13 +219,18 @@ void main() {
       final container = makeContainer();
       await container.read(speakControllerProvider.notifier).startListening();
 
-      recognizer.emitFailure(const SpeechFailure(
-        SpeechFailureKind.noSpeechDetected,
-        isPermanent: false,
-      ));
+      recognizer.emitFailure(
+        const SpeechFailure(
+          SpeechFailureKind.noSpeechDetected,
+          isPermanent: false,
+        ),
+      );
       await settle();
 
-      expect(container.read(speakControllerProvider).notice, const NothingHeard());
+      expect(
+        container.read(speakControllerProvider).notice,
+        const NothingHeard(),
+      );
     });
 
     test('a missing offline model offers the download', () async {
@@ -457,28 +472,54 @@ void main() {
       );
     });
 
-    test('a session the platform ends by itself frees the next press',
-        () async {
-      final container = makeContainer();
-      final controller = container.read(speakControllerProvider.notifier);
+    test(
+      'a release before the listening callback cancels the open microphone',
+      () async {
+        recognizer.announceListening = false;
+        final container = makeContainer();
+        final controller = container.read(speakControllerProvider.notifier);
 
-      await controller.startListening();
-      await settle();
-      // The platform gives up on its own — a timeout, a busy recogniser.
-      recognizer.emitFailure(
-        const SpeechFailure(SpeechFailureKind.recognitionFailed),
-      );
-      await settle();
+        await controller.startListening();
+        expect(
+          container.read(speakControllerProvider).status,
+          SpeakStatus.starting,
+        );
+        expect(recognizer.isListening, isTrue);
 
-      await controller.startListening();
-      await settle();
+        await controller.stopListening();
 
-      expect(recognizer.startedLanguages, hasLength(2));
-      expect(
-        container.read(speakControllerProvider).status,
-        SpeakStatus.listening,
-      );
-    });
+        expect(recognizer.isListening, isFalse);
+        expect(recognizer.cancelCount, 1);
+        expect(
+          container.read(speakControllerProvider).status,
+          SpeakStatus.idle,
+        );
+      },
+    );
+
+    test(
+      'a session the platform ends by itself frees the next press',
+      () async {
+        final container = makeContainer();
+        final controller = container.read(speakControllerProvider.notifier);
+
+        await controller.startListening();
+        await settle();
+        // The platform gives up on its own — a timeout, a busy recogniser.
+        recognizer.emitFailure(
+          const SpeechFailure(SpeechFailureKind.recognitionFailed),
+        );
+        await settle();
+
+        await controller.startListening();
+        await settle();
+
+        expect(recognizer.startedLanguages, hasLength(2));
+        expect(
+          container.read(speakControllerProvider).status,
+          SpeakStatus.listening,
+        );
+      },
+    );
   });
-
 }

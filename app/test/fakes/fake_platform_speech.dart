@@ -14,6 +14,9 @@ class FakePlatformSpeech extends stt.SpeechToText {
 
   /// One entry per session the recogniser asked the platform to open.
   final sessions = <stt.SpeechListenOptions>[];
+  final resultListeners = <stt.SpeechResultListener?>[];
+  bool acceptListen = true;
+  bool announceListening = true;
   int stopCount = 0;
   int cancelCount = 0;
   bool _listening = false;
@@ -41,8 +44,9 @@ class FakePlatformSpeech extends stt.SpeechToText {
   Future<bool> get hasPermission async => true;
 
   @override
-  Future<List<stt.LocaleName>> locales() async =>
-      [stt.LocaleName('en_US', 'English (US)')];
+  Future<List<stt.LocaleName>> locales() async => [
+    stt.LocaleName('en_US', 'English (US)'),
+  ];
 
   @override
   Future<stt.LocaleName?> systemLocale() async =>
@@ -63,8 +67,12 @@ class FakePlatformSpeech extends stt.SpeechToText {
     stt.SpeechListenOptions? listenOptions,
   }) async {
     _onResult = onResult;
+    if (!acceptListen) return false;
     if (listenOptions != null) sessions.add(listenOptions);
+    resultListeners.add(onResult);
     _listening = true;
+    if (announceListening) _onStatus?.call('listening');
+    return true;
   }
 
   @override
@@ -85,10 +93,17 @@ class FakePlatformSpeech extends stt.SpeechToText {
   /// but the recogniser has not been released yet.
   void emitFinalResult(String words) {
     _listening = false;
-    _onResult?.call(SpeechRecognitionResult.init(
-      [SpeechRecognitionWords(words, null, 0.9)],
-      ResultType.finalResult,
-    ));
+    _onResult?.call(_finalResult(words));
+  }
+
+  void emitFinalResultForSession(int session, String words) {
+    resultListeners[session]?.call(_finalResult(words));
+  }
+
+  SpeechRecognitionResult _finalResult(String words) {
+    return SpeechRecognitionResult.init([
+      SpeechRecognitionWords(words, null, 0.9),
+    ], ResultType.finalResult);
   }
 
   /// The platform releasing the recogniser, which happens after the result.

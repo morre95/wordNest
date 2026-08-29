@@ -4,6 +4,7 @@ import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
+import '../platform/on_device_speech_models.dart';
 import 'speech_recognizer.dart';
 
 /// [SpeechRecognizer] backed by the platform recogniser (Android
@@ -16,8 +17,21 @@ import 'speech_recognizer.dart';
 /// default engine, and the one on which WordNest still never handles audio at
 /// all.
 class PlatformSpeechRecognizer implements SpeechRecognizer {
-  PlatformSpeechRecognizer({stt.SpeechToText? speech})
-      : _speech = speech ?? stt.SpeechToText();
+  PlatformSpeechRecognizer({
+    stt.SpeechToText? speech,
+    required OnDeviceSpeechModels onDeviceModels,
+    Duration listenStartTimeout = const Duration(seconds: 2),
+  }) : this._(
+         speech: speech ?? stt.SpeechToText(),
+         onDeviceModels: onDeviceModels,
+         listenStartTimeout: listenStartTimeout,
+       );
+
+  PlatformSpeechRecognizer._({
+    required this._speech,
+    required this._onDeviceModels,
+    required this._listenStartTimeout,
+  });
 
   /// How long a pause ends an utterance. Long enough to think mid-sentence,
   /// short enough that a translation feels immediate.
@@ -27,6 +41,8 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   static const _maxSessionLength = Duration(minutes: 5);
 
   final stt.SpeechToText _speech;
+  final OnDeviceSpeechModels _onDeviceModels;
+  final Duration _listenStartTimeout;
   final _events = StreamController<SpeechEvent>.broadcast();
 
   bool _initialised = false;
@@ -34,8 +50,11 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   Future<bool>? _initialisation;
   ListeningMode _mode = ListeningMode.single;
   String? _languageCode;
-  String? _localeId;
   bool _onDevice = true;
+  bool _routeAnnounced = false;
+  bool _acceptPlatformLifecycle = false;
+  int _sessionGeneration = 0;
+  Completer<void>? _startConfirmation;
 
   /// Set when a hands-free utterance finishes, cleared when the next session
   /// has been asked for. The restart waits for the platform to say `done`
@@ -61,16 +80,19 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     _initialisation = _speech
         .initialize(onError: _onPlatformError, onStatus: _onPlatformStatus)
         .then((worked) {
-      _initialised = worked;
-      _initialising = false;
-      return worked;
-    }).catchError((Object error) {
-      _initialising = false;
-      _emit(SpeechFailed(
-        SpeechFailure(SpeechFailureKind.unavailable, detail: '$error'),
-      ));
-      return false;
-    });
+          _initialised = worked;
+          _initialising = false;
+          return worked;
+        })
+        .catchError((Object error) {
+          _initialising = false;
+          _emit(
+            SpeechFailed(
+              SpeechFailure(SpeechFailureKind.unavailable, detail: '$error'),
+            ),
+          );
+          return false;
+        });
     return _initialisation!;
   }
 
@@ -92,39 +114,85 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     if (!await _speech.hasPermission) {
       throw const SpeechFailure(SpeechFailureKind.permissionDenied);
     }
+    if (_speech.isListening) {
+      throw const SpeechFailure(
+        SpeechFailureKind.recognitionFailed,
+        detail: 'recognizer_busy',
+      );
+    }
 
     final systemLocale = await _speech.systemLocale();
-    final locale = resolveSpeechLocale(
+    final platformLocaleIds = await availableLocaleIds();
+    final installedLocaleIds = await _onDeviceModels.installedLocaleIds();
+    final availableLocale = resolveSpeechLocale(
       languageCode: languageCode,
-      availableLocaleIds: await availableLocaleIds(),
+      availableLocaleIds: platformLocaleIds,
       systemLocaleId: systemLocale?.localeId,
     );
+    final installedLocale = installedLocaleIds == null
+        ? null
+        : resolveSpeechLocale(
+            languageCode: languageCode,
+            availableLocaleIds: installedLocaleIds,
+            systemLocaleId: systemLocale?.localeId,
+          );
+
+    // Android supplies a precise installed-model list through WordNest's
+    // native bridge. A model that is merely supported is not enough: forcing
+    // it offline produces ERROR_LANGUAGE_UNAVAILABLE. Platforms without that
+    // distinction retain speech_to_text's locale-based behaviour.
+    final useInstalledModel = installedLocale?.hasOnDeviceModel ?? false;
+    final locale = useInstalledModel ? installedLocale! : availableLocale;
 
     _mode = mode;
     _languageCode = languageCode;
-    _localeId = locale.localeId;
+    _onDevice = installedLocaleIds == null
+        ? availableLocale.hasOnDeviceModel
+        : useInstalledModel;
+    _routeAnnounced = false;
+    _acceptPlatformLifecycle = true;
+    final generation = ++_sessionGeneration;
+    final confirmation = Completer<void>();
+    _startConfirmation = confirmation;
 
-    // On-device recognition is preferred so audio never reaches a server, but
-    // only for a locale the device actually has a model for: the offline
-    // recogniser does not degrade gracefully, it fails the whole session. A
-    // language it has never heard of goes straight to the networked recogniser.
-    _onDevice = locale.hasOnDeviceModel;
     try {
-      await _listen(localeId: locale.localeId, onDevice: _onDevice);
+      await Future.wait<void>([
+        _listen(
+          generation: generation,
+          localeId: locale.localeId,
+          onDevice: _onDevice,
+        ),
+        confirmation.future.timeout(_listenStartTimeout),
+      ], eagerError: true);
+    } on TimeoutException {
+      _acceptPlatformLifecycle = false;
+      if (generation == _sessionGeneration) {
+        await _speech.cancel();
+      }
+      throw const SpeechFailure(
+        SpeechFailureKind.recognitionFailed,
+        detail: 'listen_not_started',
+      );
+    } on SpeechFailure {
+      _acceptPlatformLifecycle = false;
+      if (generation == _sessionGeneration) {
+        await _speech.cancel();
+      }
+      rethrow;
     } on Exception catch (error) {
+      _acceptPlatformLifecycle = false;
+      if (generation == _sessionGeneration) {
+        await _speech.cancel();
+      }
       throw SpeechFailure(
         SpeechFailureKind.recognitionFailed,
         detail: '$error',
       );
+    } finally {
+      if (identical(_startConfirmation, confirmation)) {
+        _startConfirmation = null;
+      }
     }
-    _announceListening();
-  }
-
-  void _announceListening() {
-    _emit(SpeechRouteChanged(
-      _onDevice ? SpeechRoute.onDevice : SpeechRoute.phoneOnline,
-    ));
-    _emit(const SpeechLifecycleChanged(SpeechLifecycle.listening));
   }
 
   /// Emits, unless this recogniser has been disposed.
@@ -138,10 +206,14 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     _events.add(event);
   }
 
-  Future<void> _listen({required String localeId, required bool onDevice}) {
+  Future<void> _listen({
+    required int generation,
+    required String localeId,
+    required bool onDevice,
+  }) {
     return _speech.listen(
-      onResult: _onResult,
-      onSoundLevelChange: _onSoundLevel,
+      onResult: (result) => _onResult(generation, result),
+      onSoundLevelChange: (level) => _onSoundLevel(generation, level),
       listenOptions: stt.SpeechListenOptions(
         localeId: localeId,
         onDevice: onDevice,
@@ -155,13 +227,19 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     );
   }
 
-  void _onResult(SpeechRecognitionResult result) {
+  void _onResult(int generation, SpeechRecognitionResult result) {
+    if (generation != _sessionGeneration) return;
     final text = result.recognizedWords.trim();
     if (result.finalResult) {
       if (text.isEmpty) {
-        _emit(const SpeechFailed(
-          SpeechFailure(SpeechFailureKind.noSpeechDetected, isPermanent: false),
-        ));
+        _emit(
+          const SpeechFailed(
+            SpeechFailure(
+              SpeechFailureKind.noSpeechDetected,
+              isPermanent: false,
+            ),
+          ),
+        );
       } else {
         _emit(SpeechFinal(text, confidence: result.confidence));
       }
@@ -183,13 +261,31 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     }
   }
 
-  void _onSoundLevel(double level) {
+  void _onSoundLevel(int generation, double level) {
+    if (generation != _sessionGeneration) return;
     // speech_to_text reports roughly -2..10 on Android and dB on iOS; clamp to
     // a 0..1 band the animation can use without knowing the platform.
     _emit(SpeechSoundLevel((level / 10).clamp(0.0, 1.0)));
   }
 
   void _onPlatformStatus(String status) {
+    if (!_acceptPlatformLifecycle) return;
+
+    if (status == 'listening') {
+      final confirmation = _startConfirmation;
+      if (confirmation != null && !confirmation.isCompleted) {
+        confirmation.complete();
+      }
+      if (!_routeAnnounced) {
+        _routeAnnounced = true;
+        _emit(
+          SpeechRouteChanged(
+            _onDevice ? SpeechRoute.onDevice : SpeechRoute.phoneOnline,
+          ),
+        );
+      }
+    }
+
     final lifecycle = switch (status) {
       'listening' => SpeechLifecycle.listening,
       'notListening' => SpeechLifecycle.processing,
@@ -198,7 +294,11 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
     };
     if (lifecycle != null) _emit(SpeechLifecycleChanged(lifecycle));
 
-    if (status != 'done' || !_restartWhenDone) return;
+    if (status != 'done') return;
+    if (!_restartWhenDone) {
+      _acceptPlatformLifecycle = false;
+      return;
+    }
     _restartWhenDone = false;
     // A stop or a cancel between the result and this point turns hands-free
     // off, and the session the user ended must stay ended.
@@ -208,42 +308,22 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
 
   void _onPlatformError(SpeechRecognitionError error) {
     final failure = _translateError(error);
-    // The offline recogniser reports an unusable model asynchronously, once the
-    // session is already running, so this is the only place the fallback can
-    // live. A locale it cannot serve is not a locale the phone cannot hear —
-    // the networked recogniser still can — so move there instead of telling the
-    // user their device does not speak their language.
-    if (_onDevice && failure.kind == SpeechFailureKind.localeUnsupported) {
-      unawaited(_retryOffDevice());
+    final confirmation = _startConfirmation;
+    if (confirmation != null && !confirmation.isCompleted) {
+      confirmation.completeError(failure);
       return;
     }
+    _acceptPlatformLifecycle = false;
     _emit(SpeechFailed(failure));
-  }
-
-  /// Restarts the session on the networked recogniser. [_onDevice] is cleared
-  /// first so a second locale failure reaches the user instead of looping.
-  Future<void> _retryOffDevice() async {
-    _onDevice = false;
-    try {
-      await _listen(localeId: _localeId!, onDevice: false);
-    } on Exception catch (error) {
-      _emit(SpeechFailed(SpeechFailure(
-        SpeechFailureKind.recognitionFailed,
-        detail: '$error',
-      )));
-      return;
-    }
-    _announceListening();
   }
 
   static SpeechFailure _translateError(SpeechRecognitionError error) {
     final kind = switch (error.errorMsg) {
-      'error_speech_timeout' || 'error_no_match' =>
-        SpeechFailureKind.noSpeechDetected,
+      'error_speech_timeout' ||
+      'error_no_match' => SpeechFailureKind.noSpeechDetected,
       'error_permission' => SpeechFailureKind.permissionDenied,
       'error_language_not_supported' ||
-      'error_language_unavailable' =>
-        SpeechFailureKind.localeUnsupported,
+      'error_language_unavailable' => SpeechFailureKind.localeUnsupported,
       // The networked recogniser is reached over the internet, so these say
       // nothing about the microphone or the language — only that the service
       // behind it is out of reach right now.
@@ -251,8 +331,7 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
       'error_network_timeout' ||
       'error_server' ||
       'error_server_disconnected' ||
-      'error_too_many_requests' =>
-        SpeechFailureKind.networkUnavailable,
+      'error_too_many_requests' => SpeechFailureKind.networkUnavailable,
       'error_audio_error' => SpeechFailureKind.audioUnavailable,
       // Busy and client errors are the recogniser tripping over itself; a
       // second attempt usually works, which is all the user can be told.
@@ -277,6 +356,12 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   Future<void> cancel() async {
     _mode = ListeningMode.single;
     _restartWhenDone = false;
+    _acceptPlatformLifecycle = false;
+    _sessionGeneration++;
+    final confirmation = _startConfirmation;
+    if (confirmation != null && !confirmation.isCompleted) {
+      confirmation.complete();
+    }
     await _speech.cancel();
     _emit(const SpeechLifecycleChanged(SpeechLifecycle.idle));
   }

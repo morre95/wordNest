@@ -20,8 +20,8 @@ class FallbackSpeechRecognizer implements SpeechRecognizer {
     required SpeechRecognizer fallback,
     // ignore_for_file: prefer_initializing_formals — Dart has no initialising
     // formal for a private field behind a public named parameter.
-  })  : _preferred = preferred,
-        _fallback = fallback {
+  }) : _preferred = preferred,
+       _fallback = fallback {
     _forward(_preferred);
     _forward(_fallback);
   }
@@ -35,13 +35,16 @@ class FallbackSpeechRecognizer implements SpeechRecognizer {
   /// The child that owns the running session, so stop and cancel reach the one
   /// that is actually listening.
   SpeechRecognizer? _active;
+  int _sessionGeneration = 0;
 
   void _forward(SpeechRecognizer child) {
     // Events from the child that is not running are dropped rather than
     // relayed: a torn-down session must not be able to speak over a live one.
-    _forwarding.add(child.events.listen((event) {
-      if (identical(_active, child) && !_events.isClosed) _events.add(event);
-    }));
+    _forwarding.add(
+      child.events.listen((event) {
+        if (identical(_active, child) && !_events.isClosed) _events.add(event);
+      }),
+    );
   }
 
   @override
@@ -70,11 +73,16 @@ class FallbackSpeechRecognizer implements SpeechRecognizer {
     required String languageCode,
     ListeningMode mode = ListeningMode.single,
   }) async {
+    final generation = ++_sessionGeneration;
     _active = _preferred;
     try {
       await _preferred.start(languageCode: languageCode, mode: mode);
+      if (generation != _sessionGeneration) {
+        await _preferred.cancel();
+      }
       return;
     } on SpeechFailure catch (failure) {
+      if (generation != _sessionGeneration) return;
       if (!_isWorthFallingBackFrom(failure)) {
         _active = null;
         rethrow;
@@ -83,10 +91,15 @@ class FallbackSpeechRecognizer implements SpeechRecognizer {
 
     // Only reached when the preferred recogniser could not be reached at all,
     // so there is no session of its to tear down.
+    if (generation != _sessionGeneration) return;
     _active = _fallback;
     try {
       await _fallback.start(languageCode: languageCode, mode: mode);
+      if (generation != _sessionGeneration) {
+        await _fallback.cancel();
+      }
     } on SpeechFailure {
+      if (generation != _sessionGeneration) return;
       _active = null;
       rethrow;
     }
@@ -104,12 +117,16 @@ class FallbackSpeechRecognizer implements SpeechRecognizer {
 
   @override
   Future<void> cancel() async {
-    await _active?.cancel();
+    _sessionGeneration++;
+    final active = _active;
     _active = null;
+    await active?.cancel();
   }
 
   @override
   Future<void> dispose() async {
+    _sessionGeneration++;
+    _active = null;
     for (final subscription in _forwarding) {
       await subscription.cancel();
     }
