@@ -101,6 +101,7 @@ async def test_the_fake_is_refused_in_production() -> None:
     with pytest.raises(RuntimeError, match="cannot be used in production"):
         build_speech_provider(
             Settings(
+                _env_file=None,
                 environment=Environment.production,
                 jwt_secret="a-real-secret-for-this-test",
             )
@@ -120,7 +121,9 @@ async def test_deepgram_without_a_key_fails_at_startup() -> None:
     with pytest.raises(RuntimeError, match="WORDNEST_DEEPGRAM_API_KEY"):
         build_speech_provider(
             Settings(
+                _env_file=None,
                 environment=Environment.test,
                 speech_provider=SpeechProviderName.deepgram,
+                deepgram_api_key=None,
             )
         )

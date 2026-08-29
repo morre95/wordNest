@@ -8,7 +8,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -131,6 +131,22 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     prompts_directory: Path = Path(__file__).resolve().parents[3] / "prompts"
+
+    @field_validator("database_url")
+    @classmethod
+    def _require_an_async_driver(cls, value: str) -> str:
+        """Managed Postgres hands out `postgresql://`, which is a sync driver.
+
+        Railway's `${{Postgres.DATABASE_URL}}` — like most providers' — names
+        no driver, and SQLAlchemy then reaches for psycopg2, which this service
+        does not install and could not use: both the engine and the migrations
+        run through SQLAlchemy's async API. Correcting it here rather than in
+        the environment keeps that a property of the service instead of
+        something every deployment has to remember.
+        """
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
 
     @property
     def is_production(self) -> bool:

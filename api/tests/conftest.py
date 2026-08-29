@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from wordnest_api.core.config import (
+    EmailProviderName,
     Environment,
     Settings,
     SpeechProviderName,
@@ -49,6 +50,10 @@ def settings(database_url: str) -> Settings:
         environment=Environment.test,
         translation_provider=TranslationProviderName.fake,
         speech_provider=SpeechProviderName.fake,
+        # Pinned for the same reason as the providers above: the suite reads
+        # the token out of the logging sender, and a developer's .env must not
+        # be able to decide that.
+        email_provider=EmailProviderName.logging,
         translation_rate_limit_per_minute=60,
         log_request_bodies=False,
         database_url=database_url,
