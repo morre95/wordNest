@@ -144,6 +144,11 @@ uv run alembic downgrade -1          # and back, to check it is reversible
 test suite runs them too, against a fresh SQLite file per test, so they are
 exercised on every run.
 
+Railway reads the repository-root `railway.json` and runs `alembic upgrade
+head` as a pre-deploy command. This keeps migrations out of API startup while
+ensuring a new production database has its schema before a release begins
+serving requests.
+
 ### Integration checks
 
 Two suites run the app's real HTTP client against a running service. They are
