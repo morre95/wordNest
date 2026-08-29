@@ -37,6 +37,13 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   String? _localeId;
   bool _onDevice = true;
 
+  /// Set when a hands-free utterance finishes, cleared when the next session
+  /// has been asked for. The restart waits for the platform to say `done`
+  /// rather than happening in the result callback: Android has not released
+  /// the recogniser at the moment a final result arrives, and starting there
+  /// earns ERROR_RECOGNIZER_BUSY instead of a session.
+  bool _restartWhenDone = false;
+
   @override
   bool get isAvailable => _initialised && _speech.isAvailable;
 
@@ -159,9 +166,9 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
         _emit(SpeechFinal(text, confidence: result.confidence));
       }
       if (_mode == ListeningMode.continuous && _languageCode != null) {
-        // Hands-free: the platform ends the session at each pause, so start the
-        // next one immediately. Failures surface as events, not exceptions.
-        unawaited(_restartContinuous());
+        // Hands-free: the platform ends the session at each pause and the next
+        // one opens on `done`, once the recogniser has actually been released.
+        _restartWhenDone = true;
       }
     } else if (text.isNotEmpty) {
       _emit(SpeechPartial(text));
@@ -190,6 +197,13 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
       _ => null,
     };
     if (lifecycle != null) _emit(SpeechLifecycleChanged(lifecycle));
+
+    if (status != 'done' || !_restartWhenDone) return;
+    _restartWhenDone = false;
+    // A stop or a cancel between the result and this point turns hands-free
+    // off, and the session the user ended must stay ended.
+    if (_mode != ListeningMode.continuous || _languageCode == null) return;
+    unawaited(_restartContinuous());
   }
 
   void _onPlatformError(SpeechRecognitionError error) {
@@ -230,6 +244,18 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
       'error_language_not_supported' ||
       'error_language_unavailable' =>
         SpeechFailureKind.localeUnsupported,
+      // The networked recogniser is reached over the internet, so these say
+      // nothing about the microphone or the language — only that the service
+      // behind it is out of reach right now.
+      'error_network' ||
+      'error_network_timeout' ||
+      'error_server' ||
+      'error_server_disconnected' ||
+      'error_too_many_requests' =>
+        SpeechFailureKind.networkUnavailable,
+      'error_audio_error' => SpeechFailureKind.audioUnavailable,
+      // Busy and client errors are the recogniser tripping over itself; a
+      // second attempt usually works, which is all the user can be told.
       'error_busy' || 'error_client' => SpeechFailureKind.recognitionFailed,
       _ => SpeechFailureKind.recognitionFailed,
     };
@@ -243,12 +269,14 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   @override
   Future<void> stop() async {
     _mode = ListeningMode.single;
+    _restartWhenDone = false;
     await _speech.stop();
   }
 
   @override
   Future<void> cancel() async {
     _mode = ListeningMode.single;
+    _restartWhenDone = false;
     await _speech.cancel();
     _emit(const SpeechLifecycleChanged(SpeechLifecycle.idle));
   }
