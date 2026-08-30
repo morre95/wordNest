@@ -17,14 +17,59 @@ import 'widgets/transcript_panel.dart';
 
 /// The launch screen. Nothing stands between a cold start and the microphone:
 /// no onboarding, no sign-in, no modal.
-class SpeakScreen extends ConsumerWidget {
+class SpeakScreen extends ConsumerStatefulWidget {
   const SpeakScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SpeakScreen> createState() => _SpeakScreenState();
+}
+
+class _SpeakScreenState extends ConsumerState<SpeakScreen> {
+  final _transcriptScroll = ScrollController();
+  int _transcriptLength = 0;
+
+  @override
+  void dispose() {
+    _transcriptScroll.dispose();
+    super.dispose();
+  }
+
+  void _followTranscript() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToTranscriptEnd(retryAfterLayout: true);
+    });
+  }
+
+  void _scrollToTranscriptEnd({bool retryAfterLayout = false}) {
+    if (!mounted || !_transcriptScroll.hasClients) return;
+    final position = _transcriptScroll.position;
+    if (position.maxScrollExtent > position.pixels) {
+      _transcriptScroll.animateTo(
+        position.maxScrollExtent,
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+      );
+      return;
+    }
+    // Scroll metrics can lag the rebuild that inserted a much taller Text by
+    // one frame. Retry once; short transcripts simply remain at extent zero.
+    if (retryAfterLayout) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToTranscriptEnd();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(speakControllerProvider);
     final controller = ref.read(speakControllerProvider.notifier);
     final isHandsFree = state.mode == ListeningMode.continuous;
+    final nextTranscriptLength = state.sourceText.length;
+    if (nextTranscriptLength > _transcriptLength) {
+      _followTranscript();
+    }
+    _transcriptLength = nextTranscriptLength;
 
     return Scaffold(
       appBar: AppBar(
@@ -84,6 +129,8 @@ class SpeakScreen extends ConsumerWidget {
               Expanded(
                 child: Center(
                   child: SingleChildScrollView(
+                    key: const Key('speak.transcriptScroll'),
+                    controller: _transcriptScroll,
                     child: TranscriptPanel(
                       state: state,
                       onSpeakTranslation: () => _speakTranslation(

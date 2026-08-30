@@ -208,6 +208,30 @@ void main() {
     expect(speaker.spoken.single.languageCode, 'es');
   });
 
+  testWidgets('hands-free shows and speaks the combined paragraph', (
+    tester,
+  ) async {
+    await pumpSpeakScreen(tester);
+    await tester.tap(find.byKey(const Key('speak.handsFreeToggle')));
+    await tester.pump();
+    await tester.tap(find.byType(MicButton));
+    await tester.pump();
+
+    recognizer
+      ..emitFinal('First sentence.')
+      ..emitFinal('Second sentence.');
+    for (var index = 0; index < 10; index++) {
+      await tester.pump();
+    }
+
+    expect(find.text('First sentence. Second sentence.'), findsOneWidget);
+    expect(find.text('[es] First sentence. Second sentence.'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('speak.translationText')));
+    await tester.pump();
+    expect(speaker.spoken.single.text, '[es] First sentence. Second sentence.');
+  });
+
   testWidgets('a provisional translation is not spoken', (tester) async {
     // It is about to be replaced; hearing it would teach the wrong
     // pronunciation.
@@ -241,7 +265,36 @@ void main() {
     await tester.tap(find.byKey(const Key('speak.flagUtterance')));
     await tester.pump();
 
-    expect(find.text('Marked as hard'), findsOneWidget);
+    expect(find.text('Latest sentence marked as hard'), findsOneWidget);
+  });
+
+  testWidgets('a growing hands-free paragraph follows the newest text', (
+    tester,
+  ) async {
+    await pumpSpeakScreen(tester);
+    await tester.tap(find.byKey(const Key('speak.handsFreeToggle')));
+    await tester.pump();
+    await tester.tap(find.byType(MicButton));
+    await tester.pump();
+
+    recognizer.emitPartial(
+      List<String>.generate(
+        80,
+        (index) => 'sentence fragment number $index',
+      ).join(' '),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    final scrollable = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byKey(const Key('speak.transcriptScroll')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(scrollable.position.maxScrollExtent, greaterThan(0));
+    expect(scrollable.position.pixels, scrollable.position.maxScrollExtent);
   });
 
   testWidgets('hands-free turns the microphone into a toggle', (tester) async {

@@ -54,8 +54,8 @@ class TranscriptPanel extends StatelessWidget {
               ),
               label: Text(
                 state.isLastUtteranceFlagged
-                    ? 'Marked as hard'
-                    : 'That one was hard',
+                    ? 'Latest sentence marked as hard'
+                    : 'Mark latest sentence as hard',
               ),
             ),
           ),

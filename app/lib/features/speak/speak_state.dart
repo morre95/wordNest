@@ -46,8 +46,12 @@ abstract class SpeakState with _$SpeakState {
     @Default(SpeakStatus.idle) SpeakStatus status,
     @Default(ListeningMode.single) ListeningMode mode,
 
-    /// The transcript as it stands — partial while listening, final after.
-    @Default('') String sourceText,
+    /// Everything finalised in the current microphone session. Natural pauses
+    /// add to this paragraph instead of replacing what was already said.
+    @Default('') String finalisedSourceText,
+
+    /// The recogniser's replaceable draft for the sentence being spoken now.
+    @Default('') String partialSourceText,
     @Default('') String translationText,
     @Default(TranslationSource.none) TranslationSource translationSource,
 
@@ -69,6 +73,17 @@ abstract class SpeakState with _$SpeakState {
   }) = _SpeakState;
 
   bool get isListening => status == SpeakStatus.listening;
+
+  /// The whole session as it should appear on screen. The recognisers return
+  /// each utterance without surrounding whitespace, but normalising here keeps
+  /// adapters and tests from being able to produce doubled gaps.
+  String get sourceText {
+    final finalised = finalisedSourceText.trim();
+    final partial = partialSourceText.trim();
+    if (finalised.isEmpty) return partial;
+    if (partial.isEmpty) return finalised;
+    return '$finalised $partial';
+  }
 
   bool get hasTranscript => sourceText.trim().isNotEmpty;
 

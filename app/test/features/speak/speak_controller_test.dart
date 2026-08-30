@@ -212,6 +212,83 @@ void main() {
         SpeakStatus.listening,
       );
     });
+
+    test(
+      'hands-free accumulates finals and translates the whole paragraph',
+      () async {
+        final container = makeContainer();
+        final controller = container.read(speakControllerProvider.notifier);
+        await controller.startListening(mode: ListeningMode.continuous);
+
+        recognizer
+          ..emitFinal('The bakery is closed.')
+          ..emitFinal('The bank is still open.');
+        for (var index = 0; index < 8; index++) {
+          await settle();
+        }
+
+        final state = container.read(speakControllerProvider);
+        expect(
+          state.sourceText,
+          'The bakery is closed. The bank is still open.',
+        );
+        expect(
+          state.translationText,
+          '[es] The bakery is closed. The bank is still open.',
+        );
+        expect(state.translationSource, TranslationSource.finalOnDevice);
+      },
+    );
+
+    test('a new partial is appended to the finalised paragraph', () async {
+      final container = makeContainer();
+      final controller = container.read(speakControllerProvider.notifier);
+      await controller.startListening(mode: ListeningMode.continuous);
+
+      recognizer.emitFinal('The bakery is closed.');
+      for (var index = 0; index < 4; index++) {
+        await settle();
+      }
+      recognizer.emitPartial('The bank is');
+      await settle();
+
+      expect(
+        container.read(speakControllerProvider).sourceText,
+        'The bakery is closed. The bank is',
+      );
+
+      await Future<void>.delayed(
+        SpeakController.provisionalTranslationDebounce * 2,
+      );
+      await settle();
+      final state = container.read(speakControllerProvider);
+      expect(state.translationText, '[es] The bakery is closed. The bank is');
+      expect(state.isTranslationProvisional, isTrue);
+    });
+
+    test(
+      'the paragraph remains after stopping and clears on the next session',
+      () async {
+        final container = makeContainer();
+        final controller = container.read(speakControllerProvider.notifier);
+        await controller.startListening(mode: ListeningMode.continuous);
+        recognizer.emitFinal('Keep this visible.');
+        for (var index = 0; index < 4; index++) {
+          await settle();
+        }
+
+        await controller.stopListening();
+        expect(
+          container.read(speakControllerProvider).sourceText,
+          'Keep this visible.',
+        );
+
+        await controller.startListening(mode: ListeningMode.continuous);
+        final state = container.read(speakControllerProvider);
+        expect(state.sourceText, isEmpty);
+        expect(state.translationText, isEmpty);
+      },
+    );
   });
 
   group('failures', () {
@@ -334,6 +411,56 @@ void main() {
       );
     });
 
+    test('a paragraph still saves one row per finalised sentence', () async {
+      backend.failure = const ApiException(ApiFailureKind.unreachable);
+      final container = withDatabase();
+      await container
+          .read(speakControllerProvider.notifier)
+          .startListening(mode: ListeningMode.continuous);
+
+      recognizer
+        ..emitFinal('First sentence.')
+        ..emitFinal('Second sentence.');
+      for (var index = 0; index < 12; index++) {
+        await settle();
+      }
+
+      final saved = await database.select(database.utterances).get();
+      expect(saved.map((row) => row.sourceText), [
+        'First sentence.',
+        'Second sentence.',
+      ]);
+      expect(saved.map((row) => row.translationText), [
+        '[es] First sentence.',
+        '[es] Second sentence.',
+      ]);
+      expect(
+        container.read(speakControllerProvider).translationText,
+        '[es] First sentence. Second sentence.',
+      );
+    });
+
+    test(
+      'marking the paragraph marks only its latest saved sentence',
+      () async {
+        backend.failure = const ApiException(ApiFailureKind.unreachable);
+        final container = withDatabase();
+        final controller = container.read(speakControllerProvider.notifier);
+        await controller.startListening(mode: ListeningMode.continuous);
+
+        recognizer
+          ..emitFinal('First sentence.')
+          ..emitFinal('Second sentence.');
+        for (var index = 0; index < 12; index++) {
+          await settle();
+        }
+        await controller.toggleLastUtteranceFlag();
+
+        final saved = await database.select(database.utterances).get();
+        expect(saved.map((row) => row.isFlagged), [false, true]);
+      },
+    );
+
     test("the backend's translation replaces the on-device one", () async {
       backend.response = const RemoteTranslation(
         sourceText: 'the bakery is closed',
@@ -417,6 +544,33 @@ void main() {
         container.read(speakControllerProvider).translationText,
         '[sv] hello',
       );
+    });
+
+    test('changing the pair re-translates the whole paragraph', () async {
+      final container = makeContainer();
+      final controller = container.read(speakControllerProvider.notifier);
+      await controller.startListening(mode: ListeningMode.continuous);
+      recognizer
+        ..emitFinal('First sentence.')
+        ..emitFinal('Second sentence.');
+      for (var index = 0; index < 8; index++) {
+        await settle();
+      }
+      await controller.stopListening();
+
+      await controller.setLanguagePair(
+        const LanguagePair(
+          source: Language(code: 'en', name: 'English'),
+          target: Language(code: 'sv', name: 'Swedish'),
+        ),
+      );
+      for (var index = 0; index < 4; index++) {
+        await settle();
+      }
+
+      final state = container.read(speakControllerProvider);
+      expect(state.sourceText, 'First sentence. Second sentence.');
+      expect(state.translationText, '[sv] First sentence. Second sentence.');
     });
 
     test('cancelling clears the transcript', () async {

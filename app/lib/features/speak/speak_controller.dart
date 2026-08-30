@@ -27,6 +27,16 @@ class SpeakController extends Notifier<SpeakState> {
   Timer? _debounce;
   Future<void>? _cancelling;
 
+  /// ML Kit exposes one native translator per language pair, but does not
+  /// promise that overlapping calls on it are safe. All translations therefore
+  /// pass through this tail, while revision checks keep obsolete work invisible.
+  Future<void> _translationTail = Future<void>.value();
+
+  /// Final results must be translated and saved in the order they were spoken.
+  /// This also keeps `spokenAt` ordering meaningful when two finals arrive in
+  /// the same event-loop turn.
+  Future<void> _finalisationTail = Future<void>.value();
+
   /// Whether the user currently wants a session, as opposed to whether one is
   /// running. Opening the microphone is asynchronous — the permission check,
   /// then the platform's own start — and a release that lands inside that
@@ -49,6 +59,9 @@ class SpeakController extends Notifier<SpeakState> {
 
   @override
   SpeakState build() {
+    // Invalidate any translation belonging to a recogniser that caused this
+    // notifier to rebuild. Its transcript is deliberately cleared below.
+    _transcriptRevision++;
     // Watched, not read: changing the engine in settings rebuilds this, which
     // is what tears the old recogniser down and subscribes to the new one.
     // Riverpod runs the previous build's onDispose first, so the old
@@ -124,10 +137,14 @@ class SpeakController extends Notifier<SpeakState> {
       status: SpeakStatus.starting,
       mode: mode,
       notice: null,
-      sourceText: '',
+      finalisedSourceText: '',
+      partialSourceText: '',
       translationText: '',
       translationSource: TranslationSource.none,
+      savedUtteranceId: null,
+      isLastUtteranceFlagged: false,
     );
+    _transcriptRevision++;
 
     try {
       await _recognizer.start(languageCode: state.pair.source.code, mode: mode);
@@ -179,12 +196,16 @@ class SpeakController extends Notifier<SpeakState> {
     _sessionWanted = false;
     _debounce?.cancel();
     await _recognizer.cancel();
+    _transcriptRevision++;
     state = state.copyWith(
       status: SpeakStatus.idle,
-      sourceText: '',
+      finalisedSourceText: '',
+      partialSourceText: '',
       translationText: '',
       translationSource: TranslationSource.none,
       soundLevel: 0,
+      savedUtteranceId: null,
+      isLastUtteranceFlagged: false,
     );
   }
 
@@ -209,12 +230,18 @@ class SpeakController extends Notifier<SpeakState> {
     final wasListening = state.isListening;
     if (wasListening) await cancelListening();
 
+    _transcriptRevision++;
     state = state.copyWith(
       pair: pair,
       notice: null,
-      sourceText: clearTranscript ? '' : state.sourceText,
+      finalisedSourceText: clearTranscript ? '' : state.sourceText,
+      partialSourceText: '',
       translationText: '',
       translationSource: TranslationSource.none,
+      savedUtteranceId: clearTranscript ? null : state.savedUtteranceId,
+      isLastUtteranceFlagged: clearTranscript
+          ? false
+          : state.isLastUtteranceFlagged,
     );
     await _preferences.save(pair);
 
@@ -257,8 +284,14 @@ class SpeakController extends Notifier<SpeakState> {
     switch (event) {
       case SpeechPartial(:final text):
         _transcriptRevision++;
-        state = state.copyWith(sourceText: text, notice: null);
-        _scheduleProvisionalTranslation(text, _transcriptRevision);
+        state = state.copyWith(
+          partialSourceText: text,
+          notice: null,
+          translationSource: state.translationText.isEmpty
+              ? TranslationSource.none
+              : TranslationSource.provisionalOnDevice,
+        );
+        _scheduleProvisionalTranslation(state.sourceText, _transcriptRevision);
 
       case SpeechFinal(:final text):
         _transcriptRevision++;
@@ -266,8 +299,15 @@ class SpeakController extends Notifier<SpeakState> {
         // Hands-free keeps the session alive across utterances; a single one
         // ends here, and the next press has to be able to open a new one.
         if (state.mode != ListeningMode.continuous) _sessionWanted = false;
+        final paragraph = _appendSentence(state.finalisedSourceText, text);
+        final revision = _transcriptRevision;
+        final pair = state.pair;
         state = state.copyWith(
-          sourceText: text,
+          finalisedSourceText: paragraph,
+          partialSourceText: '',
+          translationSource: state.translationText.isEmpty
+              ? TranslationSource.none
+              : TranslationSource.provisionalOnDevice,
           savedUtteranceId: null,
           isLastUtteranceFlagged: false,
           status: state.mode == ListeningMode.continuous
@@ -275,7 +315,12 @@ class SpeakController extends Notifier<SpeakState> {
               : SpeakStatus.idle,
           soundLevel: 0,
         );
-        unawaited(_finalise(text, revision: _transcriptRevision));
+        _queueFinalisation(
+          text,
+          paragraph: paragraph,
+          pair: pair,
+          revision: revision,
+        );
 
       case SpeechSoundLevel(:final level):
         state = state.copyWith(soundLevel: level);
@@ -334,23 +379,62 @@ class SpeakController extends Notifier<SpeakState> {
     String text, {
     required TranslationSource source,
     int? revision,
+    LanguagePair? pair,
   }) async {
     final forRevision = revision ?? _transcriptRevision;
+    final forPair = pair ?? state.pair;
     if (text.trim().isEmpty) return null;
     try {
-      final translation = await _translator.translate(text, pair: state.pair);
-      if (forRevision != _transcriptRevision) return translation;
+      final translation = await _translateSerially(text, pair: forPair);
+      if (forRevision != _transcriptRevision || forPair != state.pair) {
+        return translation;
+      }
       state = state.copyWith(
         translationText: translation,
         translationSource: source,
       );
       return translation;
     } on TranslationFailure catch (failure) {
-      if (forRevision == _transcriptRevision) {
+      if (forRevision == _transcriptRevision && forPair == state.pair) {
         state = state.copyWith(notice: _noticeForTranslation(failure));
       }
       return null;
     }
+  }
+
+  Future<String> _translateSerially(String text, {required LanguagePair pair}) {
+    final result = Completer<String>();
+    final translator = _translator;
+    _translationTail = _translationTail.then((_) async {
+      try {
+        result.complete(await translator.translate(text, pair: pair));
+      } on Object catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    });
+    return result.future;
+  }
+
+  void _queueFinalisation(
+    String text, {
+    required String paragraph,
+    required LanguagePair pair,
+    required int revision,
+  }) {
+    _finalisationTail = _finalisationTail
+        .then(
+          (_) => _finalise(
+            text,
+            paragraph: paragraph,
+            pair: pair,
+            revision: revision,
+          ),
+        )
+        .catchError((Object error, StackTrace stackTrace) {
+          debugPrint(
+            'WordNest: could not finalise utterance: $error\n$stackTrace',
+          );
+        });
   }
 
   /// Translates the finished utterance and saves it, in that order, so the
@@ -360,21 +444,30 @@ class SpeakController extends Notifier<SpeakState> {
   /// is worth keeping, and the backend fills the translation in later. A
   /// storage failure is surfaced but never re-raised — losing a row must not
   /// take the microphone down with it.
-  Future<void> _finalise(String text, {required int revision}) async {
-    final pair = state.pair;
-    final translation = await _translateNow(
-      text,
+  Future<void> _finalise(
+    String text, {
+    required String paragraph,
+    required LanguagePair pair,
+    required int revision,
+  }) async {
+    final paragraphTranslation = await _translateNow(
+      paragraph,
       source: TranslationSource.finalOnDevice,
       revision: revision,
+      pair: pair,
     );
+
+    final sentenceTranslation = paragraph == text
+        ? paragraphTranslation
+        : await _translateSentence(text, pair: pair, revision: revision);
 
     try {
       final saved = await _utterances.saveFinalised(
         sourceText: text,
-        translationText: translation ?? '',
+        translationText: sentenceTranslation ?? '',
         pair: pair,
       );
-      if (revision == _transcriptRevision) {
+      if (revision == _transcriptRevision && pair == state.pair) {
         state = state.copyWith(savedUtteranceId: saved.id);
       }
       // Deliberately not awaited: the better translation and the word
@@ -383,10 +476,33 @@ class SpeakController extends Notifier<SpeakState> {
       unawaited(_enrichment.enrichNow(saved));
     } on Object catch (error, stackTrace) {
       debugPrint('WordNest: could not save utterance: $error\n$stackTrace');
-      if (revision == _transcriptRevision) {
+      if (revision == _transcriptRevision && pair == state.pair) {
         state = state.copyWith(notice: const CouldNotSave());
       }
     }
+  }
+
+  Future<String?> _translateSentence(
+    String text, {
+    required LanguagePair pair,
+    required int revision,
+  }) async {
+    try {
+      return await _translateSerially(text, pair: pair);
+    } on TranslationFailure catch (failure) {
+      if (revision == _transcriptRevision && pair == state.pair) {
+        state = state.copyWith(notice: _noticeForTranslation(failure));
+      }
+      return null;
+    }
+  }
+
+  static String _appendSentence(String paragraph, String sentence) {
+    final before = paragraph.trim();
+    final next = sentence.trim();
+    if (before.isEmpty) return next;
+    if (next.isEmpty) return before;
+    return '$before $next';
   }
 
   /// Marks the sentence just spoken as one the user found hard.
